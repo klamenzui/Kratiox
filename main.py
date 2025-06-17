@@ -1,7 +1,6 @@
-# pip install TTS
 # pip install git+https://github.com/openai/whisper.git
-# pip install sounddevice numpy scipy noisereduce pydub webrtcvad
-# pip install sentencepiece
+# pip install TTS sentencepiece sounddevice numpy scipy noisereduce pydub webrtcvad
+
 import os
 import wave
 import threading
