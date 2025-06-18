@@ -1,5 +1,6 @@
 # setup.py
 #pip install .
+#python setup.py install
 # setup.py
 from setuptools import setup, find_packages
 
@@ -10,7 +11,11 @@ setup(
     author="klamenzui",
     python_requires=">=3.10,<3.11",        # Nur Python 3.10.x
     install_requires=[
-        "numpy==1.23.5",
+        "numpy==1.22.0",
+        "uvicorn",
+        "python-multipart",
+        "fastapi",
+        "requests",
         "scipy",
         "sounddevice",
         "webrtcvad",
