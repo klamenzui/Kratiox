@@ -1,4 +1,6 @@
 # main.py
+import socket
+
 import sounddevice as sd
 import webrtcvad
 import numpy as np
@@ -6,6 +8,7 @@ import datetime
 import time
 import requests
 import base64
+import subprocess
 
 from queue import Queue
 from collections import deque
@@ -24,7 +27,9 @@ STT_URL   = "http://localhost:8001/transcribe"
 TRANS_URL = "http://localhost:8002/translate"
 TTS_URL   = "http://localhost:8003/synthesize"
 DEST_LANG = "en"
-
+is_stt_active = True
+is_translation_active = False
+is_tts_active = False
 # =============================
 # Aufnahme bis Stille
 # =============================
@@ -95,7 +100,7 @@ def play(arr):
     sd.play(arr, samplerate=22050)
     sd.wait()
 
-def is_too_quiet(wav_bytes, threshold=200):
+def is_too_quiet(wav_bytes, threshold=100):
     samples = np.frombuffer(wav_bytes, dtype=np.int16).astype(np.float32)
     rms = np.sqrt(np.mean(samples**2))
     print(rms,  threshold)
@@ -127,22 +132,27 @@ def record_loop():
         stt_queue.put((wav, ts))
 
 def stt_loop():
+    ensure_ollama()
     print("📝 STT-Thread läuft...")
-    while True:
+    while is_stt_active:
         wav, ts = stt_queue.get()
         # in stt_loop:
         lang, text = call_stt(wav)
-        #if not is_valid_text(text):
-        #    print('is not valid text')
-        #    stt_queue.task_done()
-        #    continue
+        if not is_valid_text(text):
+            print('is not valid text')
+            stt_queue.task_done()
+            continue
         print(f"📝 ({ts}) erkannt [{lang}]: {text}")
-        trans_queue.put((text, lang, ts))
+        # Ollama-Check
+        checked = call_ollama_check(text)
+        if checked != text:
+            print(f"🔍 ({ts}) Ollama-Korrektur → {checked}")
         stt_queue.task_done()
+        trans_queue.put((checked, lang, ts))
 
 def translate_loop():
     print("🔄 Translate-Thread läuft...")
-    while True:
+    while is_translation_active:
         text, lang, ts = trans_queue.get()
         tr = call_translate(text, src=lang, dest=DEST_LANG)
         if tr:
@@ -152,12 +162,58 @@ def translate_loop():
 
 def tts_loop():
     print("🔊 TTS-Thread läuft...")
-    while True:
+    while is_tts_active:
         tr, ts = tts_queue.get()
         audio = call_tts(tr, lang=DEST_LANG)
         print(f"🔊 ({ts}) Abspielen …")
         play(audio)
         tts_queue.task_done()
+
+# ollama serve
+# ollama run llama3.2:latest
+# deepseek-r1 | llama3.2 | devstral | llama4 |codellama
+# =============================
+# Ollama-Integration
+# =============================
+OLLAMA_PORT = 11434
+OLLAMA_MODEL = "llama3.2:latest"
+
+def ensure_ollama():
+    """Stellt sicher, dass 'ollama serve' läuft."""
+    s = socket.socket()
+    try:
+        s.connect(("127.0.0.1", OLLAMA_PORT))
+        s.close()
+    except ConnectionRefusedError:
+        print("▶ Ollama läuft noch nicht – starte 'ollama serve' …")
+        subprocess.Popen(["ollama", "serve"])
+        # kurz warten, bis der Server hoch ist
+        time.sleep(2)
+
+def call_ollama_check(text: str) -> str:
+    """
+    Fragt Ollama, ob der erkannte Text Fehler enthält, und gibt eine korrigierte Fassung zurück.
+    """
+    prompt = (
+        "Du bist ein Korrektur-Tool. "
+        "Überprüfe den folgenden erkannten Text auf Erkennungsfehler und "
+        "gib nur den korrigierten Text aus:\n\n"
+        f"{text}"
+    )
+    try:
+        proc = subprocess.run(
+            ["ollama", "run", OLLAMA_MODEL, prompt],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+        else:
+            return text
+    except Exception as e:
+        print("⚠️ Ollama-Check fehlgeschlagen:", e)
+        return text
 
 # =============================
 # Main: Threads starten
