@@ -29,7 +29,7 @@ TTS_URL   = "http://localhost:8003/synthesize"
 DEST_LANG = "en"
 is_stt_active = True
 is_translation_active = False
-is_tts_active = False
+is_tts_active = True
 # =============================
 # Aufnahme bis Stille
 # =============================
@@ -138,17 +138,22 @@ def stt_loop():
         wav, ts = stt_queue.get()
         # in stt_loop:
         lang, text = call_stt(wav)
-        if not is_valid_text(text):
+        if not is_valid_text(text) or lang == "nn":
             print('is not valid text')
             stt_queue.task_done()
             continue
         print(f"📝 ({ts}) erkannt [{lang}]: {text}")
         # Ollama-Check
-        checked = call_ollama_check(text)
-        if checked != text:
-            print(f"🔍 ({ts}) Ollama-Korrektur → {checked}")
+        #checked = call_ollama_http(text)
+
+        #print(f"test Ollama-Korrektur → {checked}")
         stt_queue.task_done()
-        trans_queue.put((checked, lang, ts))
+        if not is_translation_active:
+            answer = ask_kratix(text)
+            print(f"🔍 ({ts}) Ollama-answer → {answer}")
+            tts_queue.put((answer, ts))
+        else:
+            trans_queue.put((text, lang, ts))
 
 def translate_loop():
     print("🔄 Translate-Thread läuft...")
@@ -171,13 +176,19 @@ def tts_loop():
 
 # ollama serve
 # ollama run llama3.2:latest
-# deepseek-r1 | llama3.2 | devstral | llama4 |codellama
+# deepseek-r1 | llama3.2 | devstral | llama4 |codellama | gemma3:4b-it-q4_K_M
 # =============================
 # Ollama-Integration
 # =============================
 OLLAMA_PORT = 11434
-OLLAMA_MODEL = "llama3.2:latest"
-
+OLLAMA_MODEL = "gemma3:4b-it-q4_K_M"
+# OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = "http://localhost:11434/api/chat"
+history = [
+    {"role":"system", "content":
+     "Du bist Kratix, ein hochmoderner, freundlicher und äußerst kompetenter KI-Assistent, "
+     "ganz ähnlich wie Jarvis. Antworte stets klar, übersichtlich und höflich."}
+]
 def ensure_ollama():
     """Stellt sicher, dass 'ollama serve' läuft."""
     s = socket.socket()
@@ -190,30 +201,62 @@ def ensure_ollama():
         # kurz warten, bis der Server hoch ist
         time.sleep(2)
 
-def call_ollama_check(text: str) -> str:
-    """
-    Fragt Ollama, ob der erkannte Text Fehler enthält, und gibt eine korrigierte Fassung zurück.
-    """
-    prompt = (
+def ask_kratix(user_input: str):
+    # 2) häng die neue User-Nachricht an
+    history.append({"role":"user", "content": user_input})
+    # 3) schick die gesamte History
+
+    try:
+        r = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": OLLAMA_MODEL,
+                "stream": False,
+                "messages": history
+            },
+            timeout=10
+        )
+        r.raise_for_status()
+        resp = r.json()
+        assistant_msg = resp.get("message", {}).get("content")  # oder resp["choices"][0]["message"]["content"]
+        # 4) speicher die Assistant-Antwort in der History
+        history.append({"role": "assistant", "content": assistant_msg})
+
+        return assistant_msg.strip()
+    except Exception as e:
+        print("⚠️ Ollama-Check fehlgeschlagen:", e)
+        return user_input
+
+def call_ollama_http(text: str, timeout: float = 5.0) -> str:
+    """prompt = (
         "Du bist ein Korrektur-Tool. "
         "Überprüfe den folgenden erkannten Text auf Erkennungsfehler und "
         "gib nur den korrigierten Text aus:\n\n"
         f"{text}"
-    )
+    )"""
+    prompt = """
+    Du bist Kratix, ein hochmoderner, freundlicher und äußerst kompetenter KI-Assistent, ganz ähnlich wie Jarvis. 
+    Deine Aufgabe ist es, deinem Nutzer bei allen Fragen und Aufgaben zu helfen: technische Unterstützung, Recherchen, Code-Beispiele, Terminplanung und mehr. 
+    Antworte stets klar, übersichtlich und höflich. 
+    Verwende einen professionellen, dennoch persönlichen Tonfall, und biete bei Bedarf Nachfragen an, um das Problem besser zu verstehen. 
+    Nutze dein breites Wissen und verliere nie die ruhige, hilfreiche „Jarvis“-Manier.
+    """
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt + "\n\n### Nutzer:\n" + text,
+        "stream": False,
+        # optional: temperature bzw. andere Optionen
+        "options": {"temperature": 0.0}
+    }
     try:
-        proc = subprocess.run(
-            ["ollama", "run", OLLAMA_MODEL, prompt],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.strip()
-        else:
-            return text
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json().get("response", "").strip()
+        return data
     except Exception as e:
         print("⚠️ Ollama-Check fehlgeschlagen:", e)
         return text
+
 
 # =============================
 # Main: Threads starten
