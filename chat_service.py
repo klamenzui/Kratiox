@@ -4,13 +4,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import re, requests, datetime
 from datetime import datetime
-
+import subprocess
 from pyexpat.errors import messages
 
 from memory import MemoryDB
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "deepseek-r1:8b"#"gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
+OLLAMA_MODEL = "deepseek-r1:8b"  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
 
 memory = MemoryDB()
 app = FastAPI()
@@ -18,10 +18,33 @@ app = FastAPI()
 history = {}
 MAX_TURNS = 8  # z.B. 8 user+assistant-Paare
 
+
+def ensure_model(model: str):
+    # Liste aller derzeit geladenen Modelle abrufen
+    res = subprocess.run(
+        ["ollama", "list"], capture_output=True, text=True, check=True
+    )
+    installed = res.stdout  # enthält Modellnamen, einen pro Zeile
+    print("installed:")
+    print(installed)
+    if model not in installed:
+        print(f"Modell {model} nicht gefunden – lade es herunter …")
+        subprocess.run(
+            ["ollama", "run", model], check=True
+        )
+        print("Download abgeschlossen.")
+    res = subprocess.run(
+        ["ollama", "ps"], capture_output=True, text=True, check=True
+    )
+    print("ps:")
+    print(res.stdout)
+
+
 def strip_think_blocks(text: str) -> str:
     # DOTALL sorgt dafür, dass auch Zeilenumbrüche von . erfasst werden
     pattern = re.compile(r'<think>.*?</think>', flags=re.DOTALL)
     return pattern.sub('', text)
+
 
 def get_datetime_message():
     now = datetime.now()
@@ -111,7 +134,7 @@ def chat(req: ChatRequest):
     # 2) Baue den Prompt
     if chat_id not in history:
         history[chat_id] = [
-            {"role":"system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT},
             get_datetime_message()
         ]
     # Füge Kontext-Facts dieses Users hinzu
@@ -120,18 +143,19 @@ def chat(req: ChatRequest):
     else:
         ctx_lines = "Keine früheren Fakten."
 
-
     # 3) Anfrage an Ollama
     payload = {
-        "model":    OLLAMA_MODEL,
-        "stream":   False,
-        "messages": history[chat_id] + [{"role": "system", "content": ctx_lines}, {"role":"user", "content": text}]
+        "model": OLLAMA_MODEL,
+        "stream": False,
+        "messages": history[chat_id] + [{"role": "system", "content": ctx_lines}, {"role": "user", "content": text}]
     }
     # Füge die neue User-Nachricht hinzu
-    history[chat_id].append({"role":"user", "content": text})
+    history[chat_id].append({"role": "user", "content": text})
     prune_history(chat_id)
     try:
         resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
+        if resp.status_code != 200:
+            print("Ollama-Error:", resp.status_code, resp.text)
         resp.raise_for_status()
         data = resp.json()
         full = data.get("message", {}).get("content").strip()
@@ -146,23 +170,24 @@ def chat(req: ChatRequest):
         facts = {}
         for line in facts_part.strip().splitlines():
             if ":" in line:
-                key, val = line.split(":",1)
+                key, val = line.split(":", 1)
                 facts[key.strip().lower()] = val.strip()
         # 5) Speichere scoped Facts
-        print("facts",facts)
+        print("facts", facts)
         if facts:
             memory.store_facts(chat_id, user_id, facts)
     else:
         answer = full
-    print("store",memory.store)
+    print("store", memory.store)
     # 6) Speichere Assistant-Turn in history
-    #history[chat_id].append({"role":"assistant", "content": answer.strip()})
-    #prune_history(chat_id)
+    # history[chat_id].append({"role":"assistant", "content": answer.strip()})
+    # prune_history(chat_id)
 
     return ChatResponse(reply=answer.strip())
 
 
 if __name__ == "__main__":
+    ensure_model(OLLAMA_MODEL)
     uvicorn.run("chat_service:app", host="0.0.0.0", port=8004)
 # zum Start:
 # uvicorn chat_service:app --host 0.0.0.0 --port 8004
