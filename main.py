@@ -132,7 +132,7 @@ def record_loop():
         stt_queue.put((wav, ts))
 
 def stt_loop():
-    ensure_ollama()
+    # ensure_ollama()
     print("📝 STT-Thread läuft...")
     while is_stt_active:
         wav, ts = stt_queue.get()
@@ -149,7 +149,7 @@ def stt_loop():
         #print(f"test Ollama-Korrektur → {checked}")
         stt_queue.task_done()
         if not is_translation_active:
-            answer = ask_kratix(text)
+            answer = call_chat(text)
             print(f"🔍 ({ts}) Ollama-answer → {answer}")
             tts_queue.put((answer, ts))
         else:
@@ -174,88 +174,15 @@ def tts_loop():
         play(audio)
         tts_queue.task_done()
 
-# ollama serve
-# ollama run llama3.2:latest
-# deepseek-r1 | llama3.2 | devstral | llama4 |codellama | gemma3:4b-it-q4_K_M
-# =============================
-# Ollama-Integration
-# =============================
-OLLAMA_PORT = 11434
-OLLAMA_MODEL = "gemma3:4b-it-q4_K_M"
-# OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_URL = "http://localhost:11434/api/chat"
-history = [
-    {"role":"system", "content":
-     "Du bist Kratix, ein hochmoderner, freundlicher und äußerst kompetenter KI-Assistent, "
-     "ganz ähnlich wie Jarvis. Antworte stets klar, übersichtlich und höflich."}
-]
-def ensure_ollama():
-    """Stellt sicher, dass 'ollama serve' läuft."""
-    s = socket.socket()
-    try:
-        s.connect(("127.0.0.1", OLLAMA_PORT))
-        s.close()
-    except ConnectionRefusedError:
-        print("▶ Ollama läuft noch nicht – starte 'ollama serve' …")
-        subprocess.Popen(["ollama", "serve"])
-        # kurz warten, bis der Server hoch ist
-        time.sleep(2)
 
-def ask_kratix(user_input: str):
-    # 2) häng die neue User-Nachricht an
-    history.append({"role":"user", "content": user_input})
-    # 3) schick die gesamte History
-
-    try:
-        r = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "stream": False,
-                "messages": history
-            },
-            timeout=10
-        )
-        r.raise_for_status()
-        resp = r.json()
-        assistant_msg = resp.get("message", {}).get("content")  # oder resp["choices"][0]["message"]["content"]
-        # 4) speicher die Assistant-Antwort in der History
-        history.append({"role": "assistant", "content": assistant_msg})
-
-        return assistant_msg.strip()
-    except Exception as e:
-        print("⚠️ Ollama-Check fehlgeschlagen:", e)
-        return user_input
-
-def call_ollama_http(text: str, timeout: float = 5.0) -> str:
-    """prompt = (
-        "Du bist ein Korrektur-Tool. "
-        "Überprüfe den folgenden erkannten Text auf Erkennungsfehler und "
-        "gib nur den korrigierten Text aus:\n\n"
-        f"{text}"
-    )"""
-    prompt = """
-    Du bist Kratix, ein hochmoderner, freundlicher und äußerst kompetenter KI-Assistent, ganz ähnlich wie Jarvis. 
-    Deine Aufgabe ist es, deinem Nutzer bei allen Fragen und Aufgaben zu helfen: technische Unterstützung, Recherchen, Code-Beispiele, Terminplanung und mehr. 
-    Antworte stets klar, übersichtlich und höflich. 
-    Verwende einen professionellen, dennoch persönlichen Tonfall, und biete bei Bedarf Nachfragen an, um das Problem besser zu verstehen. 
-    Nutze dein breites Wissen und verliere nie die ruhige, hilfreiche „Jarvis“-Manier.
-    """
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt + "\n\n### Nutzer:\n" + text,
-        "stream": False,
-        # optional: temperature bzw. andere Optionen
-        "options": {"temperature": 0.0}
-    }
-    try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json().get("response", "").strip()
-        return data
-    except Exception as e:
-        print("⚠️ Ollama-Check fehlgeschlagen:", e)
-        return text
+def call_chat(user_text, chat_id="audio"):
+    r = requests.post(
+        "http://localhost:8004/chat",
+        json={"chat_id": chat_id, "message": user_text},
+        timeout=5
+    )
+    r.raise_for_status()
+    return r.json()["reply"]
 
 
 # =============================
