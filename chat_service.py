@@ -20,7 +20,7 @@ from memory import MemoryDB
 
 
 OLLAMA_URL = "http://127.0.0.1:1234/v1/chat/completions"  # "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
+OLLAMA_MODEL = "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
 
 memory = MemoryDB()
 app = FastAPI()
@@ -61,7 +61,7 @@ def get_datetime_message():
     # Hier das deutsche Format, du kannst es natürlich anpassen
     return {
         "role": "system",
-        "content": f"Ты находишься в Мюнхене. Текущая дата: {now:%Y-%m-%d}. Текущее время: {now:%H:%M} Uhr."
+        "content": f"Текущая дата: {now:%Y-%m-%d}. Текущее время: {now:%H:%M} Uhr."
     }
 
 
@@ -86,7 +86,7 @@ class ChatResponse(BaseModel):
 
 # System-Prompt nur einmal pro chat_id initial setzen
 SYSTEM_PROMPT = (
-    """Вы — Кратикс, современный, дружелюбный и компетентный ИИ-ассистент в стиле Джарвиса.
+    """Вы — Кратикс, современный, дружелюбный и компетентный ИИ-ассистент в стиле Джарвиса, находишься в Мюнхене..
 При каждом запросе пользователя формируй ровно ДВА блока, разделённых **строкой** `<-->`:
 
 - Полный, вежливый ответ на вопрос.  
