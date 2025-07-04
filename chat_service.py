@@ -5,8 +5,6 @@ from pydantic import BaseModel
 import re, requests, datetime
 from datetime import datetime
 import subprocess
-from pyexpat.errors import messages
-
 from memory import MemoryDB
 
 # zum Start:
@@ -20,13 +18,22 @@ from memory import MemoryDB
 
 
 OLLAMA_URL = "http://127.0.0.1:1234/v1/chat/completions"  # "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
+OLLAMA_MODEL = "google/gemma-3-12b"  # "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
 
 memory = MemoryDB()
 app = FastAPI()
 # Chat-History pro Nutzer (z.B. per chat_id) im Speicher
 history = {}
 MAX_TURNS = 8  # z.B. 8 user+assistant-Paare
+# System-Prompt nur einmal pro chat_id initial setzen
+# === Prompt aus Datei laden ===
+PROMPT_FILE = "./prompts/system_prompt.txt"
+SYSTEM_PROMPT = ''
+try:
+    with open(PROMPT_FILE, "r", encoding="utf-8") as f:
+        SYSTEM_PROMPT = f.read().strip()
+except Exception as e:
+    print(f"System-Prompt file not found: {PROMPT_FILE}: {e}")
 
 
 def ensure_model(model: str):
@@ -84,35 +91,9 @@ class ChatResponse(BaseModel):
     reply: str  # Assistant-Antwort
 
 
-# System-Prompt nur einmal pro chat_id initial setzen
-SYSTEM_PROMPT = (
-    """Вы — Кратикс, современный, дружелюбный и компетентный ИИ-ассистент в стиле Джарвиса, находишься в Мюнхене..
-При каждом запросе пользователя формируй ровно ДВА блока, разделённых **строкой** `<-->`:
-
-- Полный, вежливый ответ на вопрос.  
-- Сразу после строки `<-->` — структурированный список **важных фактов**, **из запроса пользователя**, в формате `Ключ: Значение`, по одному на строке.
-
-**Сохранять** лишь факты:
-- Имена реальных людей.  
-- Точные даты.  
-- Адреса, объекты.  
-- Суммы денег, номера документов, телефоны, идентификаторы и т. п.  
-- Долгосрочные договорённости, планы, предпочтения пользователя.
-
-**Никогда не сохранять** в списке фактов:
-- Любые **приветствия** (например, “Привет!”, “Здравствуйте!”, “Добрый день!”).  
-- Благодарности и комплименты (“Спасибо”, “Отлично!”, “Хорошо”).  
-- Пустые междометия или просто “да”, “нет”, “хм”.  
-- Риторические или обобщённые высказывания без конкретики (“Я люблю читать”, “Сегодня жара”).  
-- Слова, не несущие фактической нагрузки (“увы”, “пожалуй”).
-
-Если **нет** сохраняемых фактов, после `<-->` выводи **пустую строку** (никаких пробелов, только `\n`).
-"""
-)
-
-
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
+    global SYSTEM_PROMPT
     chat_id, user_id, text = req.chat_id, req.user, req.message
 
     # 1) Relevante Fact-Types finden (die Keys, die wir später speichern)
