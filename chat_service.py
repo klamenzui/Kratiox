@@ -6,7 +6,7 @@ import re, requests, datetime
 from datetime import datetime
 import subprocess
 from memory import MemoryDB
-
+import json
 # zum Start:
 # uvicorn chat_service:app --host 0.0.0.0 --port 8004
 # ollama serve
@@ -68,7 +68,8 @@ def get_datetime_message():
     # Hier das deutsche Format, du kannst es natürlich anpassen
     return {
         "role": "system",
-        "content": f"Текущая дата: {now:%Y-%m-%d}. Текущее время: {now:%H:%M} Uhr."
+        #"content": f"Текущая дата: {now:%Y-%m-%d}. Текущее время: {now:%H:%M} Uhr."
+        "content": f"Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M} Uhr."
     }
 
 
@@ -106,8 +107,7 @@ def chat(req: ChatRequest):
     # 2) Baue den Prompt
     if chat_id not in history:
         history[chat_id] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            get_datetime_message()
+            {"role": "system", "content": SYSTEM_PROMPT}
         ]
     # Füge Kontext-Facts dieses Users hinzu
     if needed_types:
@@ -120,7 +120,7 @@ def chat(req: ChatRequest):
         "model": AI_MODEL,
         "stream": False,
         #"stream": True,
-        "messages": history[chat_id] + [{"role": "system", "content": ctx_lines}, {"role": "user", "content": text}]
+        "messages": history[chat_id] + [get_datetime_message(),{"role": "system", "content": ctx_lines}, {"role": "user", "content": text}]
     }
     # Füge die neue User-Nachricht hinzu
     history[chat_id].append({"role": "user", "content": text})
@@ -144,20 +144,42 @@ def chat(req: ChatRequest):
     if "deepseek" in AI_MODEL:
         full = strip_think_blocks(full)
     # 4) Split in Antwort und Facts-Teil
-    if "<-->" in full:
-        answer, facts_part = full.split("<-->", 1)
-        # parse facts
-        facts = {}
-        for line in facts_part.strip().splitlines():
-            if ":" in line:
-                key, val = line.split(":", 1)
-                facts[key.strip().lower()] = val.strip()
-        # 5) Speichere scoped Facts
-        print("facts", facts)
-        if facts:
-            memory.store_facts(chat_id, user_id, facts)
+    sep = "<-->" if "<-->" in full else ""
+    sep = "```" if "```" in full else sep
+    if sep:
+        # answer, facts_part = full.split(sep, 1)
+        answer, payload_json = full.split(sep, 1)
+        """
+        Schneidet alles vor dem ersten '{' und nach dem letzten '}' ab,
+        parst den mittleren String als JSON und gibt das Dict zurück.
+        """
+        start = payload_json.find('{')
+        end   = payload_json.rfind('}')
+        if start == -1 or end == -1:
+            print("Kein JSON-Block gefunden")
+        else:
+            payload_json = payload_json[start:end+1]
+        print(payload_json)
+        data = json.loads(payload_json)
+
+        # 1) send answer back to user
+        if data.get("facts"): # memory.store_facts(...)
+            facts = {}
+            for line in data.get("facts").strip().splitlines():
+                if ":" in line:
+                    key, val = line.split(":", 1)
+                    facts[key.strip().lower()] = val.strip()
+            # 5) Speichere scoped Facts
+            print("facts", facts)
+            if facts:
+                memory.store_facts(chat_id, user_id, facts)
+        if data.get("settings"): print(f'settings_service.update({data["settings"]})')
+        if data.get("task"): print(f'task_service.create({data["task"]})')
+        if data.get("action"): print(f'search_results = search_service.search({data["action"]["query"]})')
+
     else:
         answer = full
+    answer = answer.replace(sep, "")
     history[chat_id].append({"role": "assistant", "content": answer})
     print("store", memory.store)
     # 6) Speichere Assistant-Turn in history
