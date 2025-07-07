@@ -17,8 +17,8 @@ from memory import MemoryDB
 # =============================
 
 
-OLLAMA_URL = "http://127.0.0.1:1234/v1/chat/completions"  # "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "google/gemma-3-12b"  # "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
+AI_URL = "http://127.0.0.1:1234/v1/chat/completions"  # "http://localhost:11434/api/chat"
+AI_MODEL = "google/gemma-3-12b"  # "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
 
 memory = MemoryDB()
 app = FastAPI()
@@ -27,7 +27,7 @@ history = {}
 MAX_TURNS = 8  # z.B. 8 user+assistant-Paare
 # System-Prompt nur einmal pro chat_id initial setzen
 # === Prompt aus Datei laden ===
-PROMPT_FILE = "./prompts/system_prompt.txt"
+PROMPT_FILE = "./prompts/en/system_prompt.txt"
 SYSTEM_PROMPT = ''
 try:
     with open(PROMPT_FILE, "r", encoding="utf-8") as f:
@@ -117,15 +117,17 @@ def chat(req: ChatRequest):
 
     # 3) Anfrage an Ollama
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": AI_MODEL,
         "stream": False,
+        #"stream": True,
         "messages": history[chat_id] + [{"role": "system", "content": ctx_lines}, {"role": "user", "content": text}]
     }
     # Füge die neue User-Nachricht hinzu
     history[chat_id].append({"role": "user", "content": text})
     prune_history(chat_id)
     try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=55)
+        print(payload)
+        resp = requests.post(AI_URL, json=payload, timeout=55)
         if resp.status_code != 200:
             print("Ollama-Error:", resp.status_code, resp.text)
         resp.raise_for_status()
@@ -139,7 +141,7 @@ def chat(req: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ollama-Fehler: {e}")
     print(full)
-    if "deepseek" in OLLAMA_MODEL:
+    if "deepseek" in AI_MODEL:
         full = strip_think_blocks(full)
     # 4) Split in Antwort und Facts-Teil
     if "<-->" in full:
@@ -156,6 +158,7 @@ def chat(req: ChatRequest):
             memory.store_facts(chat_id, user_id, facts)
     else:
         answer = full
+    history[chat_id].append({"role": "assistant", "content": answer})
     print("store", memory.store)
     # 6) Speichere Assistant-Turn in history
     # history[chat_id].append({"role":"assistant", "content": answer.strip()})
@@ -165,5 +168,5 @@ def chat(req: ChatRequest):
 
 
 if __name__ == "__main__":
-    # ensure_model(OLLAMA_MODEL)
+    # ensure_model(AI_MODEL)
     uvicorn.run("chat_service:app", host="0.0.0.0", port=8004)
