@@ -26,10 +26,19 @@ PRE_MS         = 500   # ms Vorpuffer für Speech-Start
 STT_URL   = "http://localhost:8001/transcribe"
 TRANS_URL = "http://localhost:8002/translate"
 TTS_URL   = "http://localhost:8003/synthesize"
-DEST_LANG = "en"
-is_stt_active = True
-is_translation_active = False
-is_tts_active = True
+services = {}
+settings = {
+    "curr_lang": "de",
+    "dest_lang": "en",
+    "active_service": {
+        "record": False
+    }
+}
+def set_curr_lang(lang:str):
+    curr_lang = settings.get("curr_lang")
+    if lang == settings["dest_lang"]:
+        settings["dest_lang"] = curr_lang
+    settings["curr_lang"] = lang
 # =============================
 # Aufnahme bis Stille
 # =============================
@@ -124,6 +133,8 @@ tts_queue = Queue()
 def record_loop():
     print("🎤 Recorder-Thread läuft...")
     while True:
+        if not settings.get("active_service").get("record"):
+            continue
         wav = record_until_silence()
         if is_too_quiet(wav):
             print('too quite')
@@ -134,7 +145,9 @@ def record_loop():
 def stt_loop():
     # ensure_ollama()
     print("📝 STT-Thread läuft...")
-    while is_stt_active:
+    while True:
+        if not ensure_service("stt_service"):
+            continue
         wav, ts = stt_queue.get()
         # in stt_loop:
         lang, text = call_stt(wav)
@@ -142,13 +155,14 @@ def stt_loop():
             print('is not valid text')
             stt_queue.task_done()
             continue
+        set_curr_lang(lang)
         print(f"📝 ({ts}) erkannt [{lang}]: {text}")
         # Ollama-Check
         #checked = call_ollama_http(text)
 
         #print(f"test Ollama-Korrektur → {checked}")
         stt_queue.task_done()
-        if not is_translation_active:
+        if not settings.get("active_service").get("translation_service"):
             answer = call_chat(text)
             print(f"🔍 ({ts}) Ollama-answer → {answer}")
             tts_queue.put((answer, ts))
@@ -157,9 +171,11 @@ def stt_loop():
 
 def translate_loop():
     print("🔄 Translate-Thread läuft...")
-    while is_translation_active:
+    while True:
+        if not ensure_service("translation_service"):
+            continue
         text, lang, ts = trans_queue.get()
-        tr = call_translate(text, src=lang, dest=DEST_LANG)
+        tr = call_translate(text, src=lang, dest=settings.get("dest_lang"))
         if tr:
             print(f"🔄 ({ts}) übersetzt → {tr}")
             tts_queue.put((tr, ts))
@@ -167,9 +183,11 @@ def translate_loop():
 
 def tts_loop():
     print("🔊 TTS-Thread läuft...")
-    while is_tts_active:
+    while True:
+        if not ensure_service("tts_service"):
+            continue
         tr, ts = tts_queue.get()
-        audio = call_tts(tr, lang=DEST_LANG)
+        audio = call_tts(tr, lang=settings.get("dest_lang"))
         print(f"🔊 ({ts}) Abspielen …")
         play(audio)
         tts_queue.task_done()
@@ -184,7 +202,53 @@ def call_chat(user_text, chat_id="audio"):
     r.raise_for_status()
     return r.json()["reply"]
 
+def start_service(script_path: str, args: list = None):
+    """
+    Startet das Script `script_path` (z.B. translation_service.py) als
+    Hintergrundprozess, wenn es noch nicht läuft.
+    """
+    if args is None:
+        args = []
+    proc = services.get(script_path)
+    # Wenn noch kein Prozess oder der alte schon beendet ist:
+    if proc is None or proc.poll() is not None:
+        cmd = ["python", f"{script_path}.py"] + args
+        # Popen startet non-blocking
+        services[script_path] = subprocess.Popen(cmd)
+        print(f">>> Service '{script_path}' gestartet mit PID {services[script_path].pid}")
+    else:
+        print(f">>> Service '{script_path}' läuft bereits (PID {proc.pid})")
 
+def stop_service(name: str):
+    """
+    Beendet den Prozess sauber, wenn er läuft.
+    """
+    proc = services.get(name)
+    if proc is None:
+        print(f"--- Service '{name}' war gar nicht aktiv.")
+        return
+    if proc.poll() is None:
+        print(f"--- Beende Service '{name}' (PID {proc.pid}) …")
+        proc.terminate()   # SIGTERM unter Unix, CTRL-BREAK u.U. unter Windows
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            print(f"*** Service '{name}' reagiert nicht, kill …")
+            proc.kill()
+    else:
+        print(f"--- Service '{name}' lief schon beendet.")
+    services.pop(name, None)
+
+def ensure_service(service_name: str):
+    is_running = services.get(service_name)
+    is_active = settings.get("active_service").get(service_name)
+    if is_active and not is_running:
+        start_service("translation_service")
+        # evtl. kurz warten, bis HTTP-Server hoch ist
+        time.sleep(1)
+    if not is_active and is_running:
+        stop_service(service_name)
+    return is_active
 # =============================
 # Main: Threads starten
 # =============================
@@ -202,3 +266,6 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n👋 Beende…")
+        # Am Programmende: alle noch laufenden Services beenden
+        for name in list(services.keys()):
+            stop_service(name)
