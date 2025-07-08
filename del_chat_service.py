@@ -1,6 +1,7 @@
 # chat_service.py
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from numba import Optional
 from pydantic import BaseModel
 import re, requests, datetime
 from datetime import datetime
@@ -101,8 +102,9 @@ def chat(req: ChatRequest):
     #    Statt Keyword-Suche hier leer lassen oder eigene Logik implementieren.
     #    Wir nutzen die vorher gespeicherten fact_types als ftypes:
     #    Deshalb rufen wir retrieve ohne ftypes, um alle bisherigen fact_types zu sehen.
-    prev = memory.retrieve(chat_id, user_id)  # dict fact_type->value
-    needed_types = list(prev.keys())
+    if user_id:
+        prev = memory.retrieve(chat_id, user_id)  # dict fact_type->value
+        needed_types = list(prev.keys())
 
     # 2) Baue den Prompt
     if chat_id not in history:
