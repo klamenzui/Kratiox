@@ -16,6 +16,7 @@ import numpy as np
 
 from memory import MemoryDB
 
+
 class KratixBrain:
     def __init__(self,
                  stt_url="http://localhost:8001/transcribe",
@@ -24,17 +25,17 @@ class KratixBrain:
                  chat_url="http://localhost:8004/chat"):
         # service endpoints
         self.urls = {
-            "stt":    stt_url,
-            "trans":  trans_url,
-            "tts":    tts_url,
-            "chat":   chat_url,
+            "stt": stt_url,
+            "trans": trans_url,
+            "tts": tts_url,
+            "chat": chat_url,
         }
 
         # queues for pipelining
         self.queues = {
-            "stt":    Queue(),
-            "trans":  Queue(),
-            "tts":    Queue(),
+            "stt": Queue(),
+            "trans": Queue(),
+            "tts": Queue(),
         }
         self.user_id = ""
         # user‐scoped memory
@@ -45,17 +46,17 @@ class KratixBrain:
 
         # settings (current and dest languages, toggles, etc.)
         self.settings = {
-            "curr_lang":  "de",
-            "dest_lang":  "en",
+            "curr_lang": "de",
+            "dest_lang": "en",
             "use_translate": False,
         }
 
         # prepare worker threads
         self._threads = [
             threading.Thread(target=self._record_loop, daemon=True),
-            threading.Thread(target=self._stt_loop,    daemon=True),
-            threading.Thread(target=self._trans_loop,  daemon=True),
-            threading.Thread(target=self._tts_loop,    daemon=True),
+            threading.Thread(target=self._stt_loop, daemon=True),
+            threading.Thread(target=self._trans_loop, daemon=True),
+            threading.Thread(target=self._tts_loop, daemon=True),
         ]
         self.history = {}  # chat_id → [ messages ]
         # load system prompt once
@@ -131,11 +132,12 @@ class KratixBrain:
         self.history[chat_id] = [self.history[chat_id][0]] + pruned
 
         return answer.strip()
+
     # ─── recording until silence ─────────────────────────────────────────────
     def _record_loop(self):
         vad = webrtcvad.Vad(2)
         frame_len = int(16000 * 30 / 1000)
-        pre_buf = deque(maxlen=int(500/30))
+        pre_buf = deque(maxlen=int(500 / 30))
         in_speech = False
         silence_ct = 0
         buffer = []
@@ -170,7 +172,7 @@ class KratixBrain:
     def _stt_loop(self):
         while True:
             wav = self.queues["stt"].get()
-            lang, text = self._call_service("stt", data=wav)
+            lang, text = self.call_service("stt", data=wav)
             if lang != "nn" and len(text.strip()) >= 3:
                 self.settings["curr_lang"] = lang
                 if self.settings["use_translate"]:
@@ -183,7 +185,7 @@ class KratixBrain:
     def _trans_loop(self):
         while True:
             text, src = self.queues["trans"].get()
-            tr = self._call_service("trans", json={"text": text, "src": src, "dest": self.settings["dest_lang"]})
+            tr = self.call_service("trans", json={"text": text, "src": src, "dest": self.settings["dest_lang"]})
             if tr:
                 self.queues["tts"].put((tr, self.settings["dest_lang"]))
 
@@ -191,12 +193,12 @@ class KratixBrain:
     def _tts_loop(self):
         while True:
             text, lang = self.queues["tts"].get()
-            audio = self._call_service("tts", json={"text": text, "lang": lang}, stream=True)
-            sd.play(audio, samplerate=22050); sd.wait()
-
+            audio = self.call_service("tts", json={"text": text, "lang": lang}, stream=True)
+            sd.play(audio, samplerate=22050)
+            sd.wait()
 
     # ─── Generic HTTP + auto‐spawn service ─────────────────────────────────
-    def _call_service(self, name, data=None, json=None, stream=False):
+    def call_service(self, name, data=None, json=None, stream=False):
         self._ensure_service(name)
         r = requests.post(self.urls[name],
                           data=data, json=json, stream=stream,
@@ -207,7 +209,8 @@ class KratixBrain:
             pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
             return pcm / np.iinfo(np.int16).max
         else:
-            return r.json().get("language", ""), r.json().get("text", "") if name=="stt" else r.json().get("translation", "") if name=="trans" else r.json().get("reply", "")
+            return r.json().get("language", ""), r.json().get("text", "") if name == "stt" else r.json().get(
+                "translation", "") if name == "trans" else r.json().get("reply", "")
 
     def _ensure_service(self, name):
         if name in self.services and self.services[name].poll() is None:
@@ -218,9 +221,9 @@ class KratixBrain:
         env = os.environ.copy()
 
         cmd_map = {
-            "stt":   [py, "-m", "uvicorn", "stt_service:app", "--host", "0.0.0.0", "--port", "8001"],
+            "stt": [py, "-m", "uvicorn", "stt_service:app", "--host", "0.0.0.0", "--port", "8001"],
             "trans": [py, "-m", "uvicorn", "translation_service:app", "--host", "0.0.0.0", "--port", "8002"],
-            "tts":   [py, "-m", "uvicorn", "tts_service:app", "--host", "0.0.0.0", "--port", "8003"],
+            "tts": [py, "-m", "uvicorn", "tts_service:app", "--host", "0.0.0.0", "--port", "8003"],
         }
 
         cmd = cmd_map[name]
@@ -245,5 +248,6 @@ class KratixBrain:
     def _stop_service(self, name):
         proc = self.services.get(name)
         if proc and proc.poll() is None:
-            proc.terminate(); proc.wait(timeout=5)
+            proc.terminate()
+            proc.wait(timeout=5)
             del self.services[name]

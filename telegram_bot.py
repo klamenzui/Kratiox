@@ -1,9 +1,7 @@
 # telegram_bot.py
 import numpy as np
-from lib2to3.btm_utils import tokens
 from pathlib import Path
 import os
-import requests
 from io import BytesIO
 
 from telegram import Update
@@ -15,11 +13,12 @@ from pydub import AudioSegment
 
 from brain import KratixBrain
 
+
 class TelegramBot:
     def __init__(self, token: str):
         # ensure ffmpeg from project/ffmpeg/bin is on PATH
         base = Path(__file__).parent
-        os.environ["PATH"] = str(base/"ffmpeg"/"bin") + os.pathsep + os.environ["PATH"]
+        os.environ["PATH"] = str(base / "ffmpeg" / "bin") + os.pathsep + os.environ["PATH"]
 
         self.brain = KratixBrain()
         self.brain.start()
@@ -60,18 +59,18 @@ class TelegramBot:
         wav_bytes = wav.getvalue()
 
         # STT
-        lang, text = self.brain._call_service("stt", data=wav_bytes)
+        lang, text = self.brain.call_service("stt", data=wav_bytes)
         # Chat
-        reply = self.brain.call_chat(text,chat_id=chat_id, user_id=name)
+        reply = self.brain.call_chat(text, chat_id=str(chat_id), user_id=name)
 
         # TTS back to user
-        pcm = self.brain._call_service("tts",
+        pcm = self.brain.call_service("tts",
                                        json={"text": reply, "lang": lang},
                                        stream=True)
         # convert float32 back to int16 WAV bytes & then to OGG/Opus @48kHz
         raw_wav = (pcm * np.iinfo(np.int16).max).astype(np.int16).tobytes()
         reply_audio = AudioSegment.from_raw(BytesIO(raw_wav),
-                                           sample_width=2, frame_rate=22050, channels=1)
+                                            sample_width=2, frame_rate=22050, channels=1)
         opus_buf = BytesIO()
         reply_audio.set_frame_rate(48000).export(
             opus_buf, format="ogg", codec="libopus")
