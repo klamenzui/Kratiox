@@ -1,4 +1,5 @@
-# brain.py
+# Fixes für brain.py - Bessere Fehlerbehandlung und Debugging
+
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ import requests
 import sounddevice as sd
 import webrtcvad
 import numpy as np
+from Tools.scripts.objgraph import ignore
 
 from memory import MemoryDB
 
@@ -43,13 +45,18 @@ class KratixBrain:
 
         # which micro‐services to auto‐spawn
         self.services = {}
+        self.service_ready = {}  # Track readiness separately
 
         # settings (current and dest languages, toggles, etc.)
         self.settings = {
             "curr_lang": "de",
             "dest_lang": "en",
             "use_translate": False,
+            "use_tts": False,
+            "use_stt": False,
         }
+        for k, value in self.memory.settings.items():
+            self.settings[k] = value
 
         # prepare worker threads
         self._threads = [
@@ -60,8 +67,12 @@ class KratixBrain:
         ]
         self.history = {}  # chat_id → [ messages ]
         # load system prompt once
-        with open("./prompts/en/system_prompt.txt", "r", encoding="utf-8") as f:
-            self.SYSTEM_PROMPT = f.read().strip()
+        try:
+            with open("./prompts/en/system_prompt.txt", "r", encoding="utf-8") as f:
+                self.SYSTEM_PROMPT = f.read().strip()
+        except FileNotFoundError:
+            print("Warning: system_prompt.txt not found, using default")
+            self.SYSTEM_PROMPT = "You are a helpful AI assistant."
 
     def start(self):
         """Start all background threads."""
@@ -73,26 +84,27 @@ class KratixBrain:
         for name in list(self.services):
             self._stop_service(name)
 
-    def get_datetime_message(self):
+    def get_system_message(self, facts, settings):
         now = datetime.now()
-        return {
-            "role": "system",
-            "content": f"Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M}Z"
-        }
+        return {"role": "system", "content": f"{self.SYSTEM_PROMPT}\n"
+                                             f"Known data: Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M}Z \n"
+                                             f"{facts}\nSettings:{settings}"}
 
     def call_chat(self, text: str, chat_id: str, user_id: str) -> str:
-        # 1) fetch or init history
-        if chat_id not in self.history:
-            self.history[chat_id] = [
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                self.get_datetime_message()
-            ]
-
-        # 2) prepend any stored facts for this user
+        ctx = ""
         facts = self.memory.retrieve(chat_id, user_id)
         if facts:
             ctx = "\n".join(f"{k}: {v}" for k, v in facts.items())
-            self.history[chat_id].append({"role": "system", "content": ctx})
+        try:
+            settings = "\n".join(f"{k}: {v}" for k, v in self.settings.items())
+        except:
+            pass
+
+        sys_message = self.get_system_message(ctx, settings)
+        if chat_id not in self.history:
+            self.history[chat_id] = [sys_message]
+        else:
+            self.history[chat_id][0] = sys_message
 
         # 3) add the user message
         self.history[chat_id].append({"role": "user", "content": text})
@@ -103,23 +115,47 @@ class KratixBrain:
             "stream": False,
             "messages": self.history[chat_id]
         }
-        r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        full = data["choices"][0]["message"]["content"].strip()
 
-        # 5) extract answer + JSON after `<-->`
-        if "<-->" in full:
-            answer, raw = full.split("<-->", 1)
+        print(f"DEBUG: Calling LLM with payload: {json.dumps(payload, indent=2)}")
+
+        try:
+            # Check if LLM server is running
+            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=30)
+            print(f"DEBUG: LLM response status: {r.status_code}")
+            if r.status_code != 200:
+                print(f"DEBUG: LLM response text: {r.text}")
+            r.raise_for_status()
+            data = r.json()
+            full = data["choices"][0]["message"]["content"].strip()
+        except requests.exceptions.ConnectionError:
+            print("ERROR: LLM server nicht erreichbar auf localhost:1234")
+            return "Entschuldigung, der Chat-Service ist nicht verfügbar."
+        except requests.exceptions.HTTPError as e:
+            print(f"ERROR: LLM server HTTP error: {e}")
+            print(f"Response: {r.text}")
+            return "Entschuldigung, es gab ein Problem mit dem Chat-Service."
+        except Exception as e:
+            print(f"ERROR: Unexpected error calling LLM: {e}")
+            return "Entschuldigung, es gab einen unerwarteten Fehler."
+
+        sep = '###' if '###' in full else  '<-->'
+        sep = '´´´' if '´´´' in full else sep
+        if sep in full:
+            answer, raw = full.split(sep, 1)
             # strip everything outside the first {...}
             start, end = raw.find("{"), raw.rfind("}")
-            js = raw[start:end + 1]
-            obj = json.loads(js)
-            # store facts if any
-            if obj.get("facts"):
-                # your JSON format: obj["facts"] is a dict already
-                self.memory.store_facts(chat_id, user_id, obj["facts"])
-            # you can also handle settings/task/actions here…
+            if start != -1 and end != -1:
+                js = raw[start:end + 1]
+                try:
+                    obj = json.loads(js)
+                    print(f"Infos: {json.dumps(obj, indent=4)}")
+                    # store facts if any
+                    if obj.get("facts"):
+                        self.memory.store_facts(chat_id, user_id, obj["facts"])
+                    if obj.get("settings"):
+                        self.memory.store_settings(obj["settings"])
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Could not parse JSON: {e}")
         else:
             answer = full
 
@@ -133,88 +169,92 @@ class KratixBrain:
 
         return answer.strip()
 
-    # ─── recording until silence ─────────────────────────────────────────────
-    def _record_loop(self):
-        vad = webrtcvad.Vad(2)
-        frame_len = int(16000 * 30 / 1000)
-        pre_buf = deque(maxlen=int(500 / 30))
-        in_speech = False
-        silence_ct = 0
-        buffer = []
-
-        with sd.InputStream(samplerate=16000, channels=1,
-                            dtype='int16', blocksize=frame_len) as stream:
-            while True:
-                pcm_frame, _ = stream.read(frame_len)
-                pcm_bytes = pcm_frame.tobytes()
-                pre_buf.append(pcm_bytes)
-
-                try:
-                    speech = vad.is_speech(pcm_bytes, 16000)
-                except webrtcvad.Error:
-                    continue
-
-                if speech:
-                    if not in_speech:
-                        in_speech = True
-                        buffer = list(pre_buf)
-                    buffer.append(pcm_bytes)
-                    silence_ct = 0
-                elif in_speech:
-                    buffer.append(pcm_bytes)
-                    silence_ct += 1
-                    if silence_ct * 30 >= 1000:
-                        # hand off to STT
-                        self.queues["stt"].put(b"".join(buffer))
-                        in_speech = False
-
     # ─── STT worker ──────────────────────────────────────────────────────────
     def _stt_loop(self):
         while True:
-            wav = self.queues["stt"].get()
-            lang, text = self.call_service("stt", data=wav)
-            if lang != "nn" and len(text.strip()) >= 3:
-                self.settings["curr_lang"] = lang
-                if self.settings["use_translate"]:
-                    self.queues["trans"].put((text, lang))
-                else:
-                    reply = self.call_chat(text, chat_id="audio", user_id=self.user_id)
-                    self.queues["tts"].put((reply, lang))
+            try:
+                wav = self.queues["stt"].get()
+                lang, text = self.call_service("stt", data=wav)
+                print(f"DEBUG: STT result - lang: {lang}, text: {text}")
+                if lang != "nn" and len(text.strip()) >= 3:
+                    self.settings["curr_lang"] = lang
+                    if self.settings["use_translate"]:
+                        self.queues["trans"].put((text, lang))
+                    else:
+                        reply = self.call_chat(text, chat_id="audio", user_id=self.user_id)
+                        self.queues["tts"].put((reply, lang))
+            except Exception as e:
+                print(f"ERROR in STT loop: {e}")
 
     # ─── Translation worker ──────────────────────────────────────────────────
     def _trans_loop(self):
         while True:
-            text, src = self.queues["trans"].get()
-            tr = self.call_service("trans", json={"text": text, "src": src, "dest": self.settings["dest_lang"]})
-            if tr:
-                self.queues["tts"].put((tr, self.settings["dest_lang"]))
+            try:
+                text, src = self.queues["trans"].get()
+                tr = self.call_service("trans", json={"text": text, "src": src, "dest": self.settings["dest_lang"]})
+                if tr:
+                    self.queues["tts"].put((tr, self.settings["dest_lang"]))
+            except Exception as e:
+                print(f"ERROR in translation loop: {e}")
 
     # ─── TTS worker ──────────────────────────────────────────────────────────
     def _tts_loop(self):
         while True:
-            text, lang = self.queues["tts"].get()
-            audio = self.call_service("tts", json={"text": text, "lang": lang}, stream=True)
-            sd.play(audio, samplerate=22050)
-            sd.wait()
+            try:
+                text, lang = self.queues["tts"].get()
+                print(f"DEBUG: TTS request - text: {text}, lang: {lang}")
+                audio = self.call_service("tts", json={"text": text, "lang": lang}, stream=True)
+                sd.play(audio, samplerate=22050)
+                sd.wait()
+            except Exception as e:
+                print(f"TTS Error: {e}")
 
     # ─── Generic HTTP + auto‐spawn service ─────────────────────────────────
     def call_service(self, name, data=None, json=None, stream=False):
         self._ensure_service(name)
-        r = requests.post(self.urls[name],
-                          data=data, json=json, stream=stream,
-                          headers={'Content-Type': 'application/octet-stream'} if data else {})
-        r.raise_for_status()
-        if stream:
-            raw = b"".join(r.iter_content(4096))
-            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-            return pcm / np.iinfo(np.int16).max
-        else:
-            return r.json().get("language", ""), r.json().get("text", "") if name == "stt" else r.json().get(
-                "translation", "") if name == "trans" else r.json().get("reply", "")
+
+        try:
+            r = requests.post(self.urls[name],
+                              data=data, json=json, stream=stream,
+                              headers={'Content-Type': 'application/octet-stream'} if data else {},
+                              timeout=30)
+
+            if r.status_code != 200:
+                print(f"ERROR: Service {name} returned {r.status_code}: {r.text}")
+
+            r.raise_for_status()
+
+            if stream:
+                raw = b"".join(r.iter_content(4096))
+                pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                return pcm / np.iinfo(np.int16).max
+            else:
+                response_data = r.json()
+                if name == "stt":
+                    return response_data.get("language", ""), response_data.get("text", "")
+                elif name == "trans":
+                    return response_data.get("translation", "")
+                else:
+                    return response_data.get("reply", "")
+        except Exception as e:
+            print(f"ERROR calling service {name}: {e}")
+            raise
 
     def _ensure_service(self, name):
-        if name in self.services and self.services[name].poll() is None:
+        # Check if service is already running and ready
+        if (name in self.services and
+                self.services[name].poll() is None and
+                self.service_ready.get(name, False)):
             return
+
+        # If service exists but not ready, don't start another one
+        if name in self.services and self.services[name].poll() is None:
+            print(f"Service {name} is running but not ready, waiting...")
+            if self._wait_for_service_ready(name):
+                return
+            else:
+                print(f"Service {name} failed to become ready, restarting...")
+                self._stop_service(name)
 
         py = sys.executable
         cwd = os.path.dirname(__file__)
@@ -228,26 +268,185 @@ class KratixBrain:
 
         cmd = cmd_map[name]
         print(f">>> Starting {name}_service:", " ".join(cmd))
-        # capture stdout/stderr so you can inspect logs if something goes wrong:
+
+        # Start the service process
         proc = subprocess.Popen(
             cmd,
             cwd=cwd,
             env=env,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
         )
         self.services[name] = proc
+        self.service_ready[name] = False
 
-        # optionally read a line to verify startup:
-        # line = proc.stdout.readline()
-        # print(f"[{name}] {line.strip()}")
+        # Wait for service to be ready with longer timeout for STT
+        max_wait = 180 if name == "stt" else 60  # 3 minutes for STT, 1 minute for others
 
-        time.sleep(5)  # give it a moment to spin up
+        if self._wait_for_service_ready(name, max_wait):
+            print(f">>> Service {name} is ready!")
+        else:
+            print(f">>> Service {name} failed to start within {max_wait} seconds")
+
+            # Try to get some output from the failed process
+            try:
+                # Don't wait too long for output from a failed process
+                stdout, stderr = proc.communicate(timeout=2)
+                if stdout:
+                    print(f"STDOUT: {stdout}")
+                if stderr:
+                    print(f"STDERR: {stderr}")
+            except subprocess.TimeoutExpired:
+                print(f">>> Service {name} is still running but not responding")
+                # Kill the process if it's stuck
+                proc.kill()
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                    if stdout:
+                        print(f"STDOUT: {stdout}")
+                    if stderr:
+                        print(f"STDERR: {stderr}")
+                except:
+                    pass
+            except Exception as e:
+                print(f"Could not get output from failed service: {e}")
+
+            # Clean up the failed service
+            self._stop_service(name)
+            raise Exception(f"Service {name} failed to start within {max_wait} seconds")
+
+    def _wait_for_service_ready(self, name, max_wait=60):
+        """Wait for service to be ready with timeout."""
+        wait_interval = 2
+        waited = 0
+
+        print(f">>> Waiting for {name} service to be ready (max {max_wait}s)...")
+
+        while waited < max_wait:
+            # Check if process is still alive
+            proc = self.services.get(name)
+            if proc and proc.poll() is not None:
+                print(f">>> Service {name} process died (exit code: {proc.poll()})")
+                return False
+
+            # Check if service is ready
+            if self._is_service_ready(name):
+                self.service_ready[name] = True
+                print(f">>> Service {name} is ready after {waited}s!")
+                return True
+
+            # Only print waiting message every 10 seconds to reduce spam
+            if waited % 10 == 0:
+                print(f">>> Still waiting for {name} service... ({waited}s/{max_wait}s)")
+
+            time.sleep(wait_interval)
+            waited += wait_interval
+
+        print(f">>> Timeout waiting for {name} service ({max_wait}s)")
+        return False
+
+    def _is_service_ready(self, name):
+        """Check if a service is ready to accept requests."""
+        try:
+            if name == "stt":
+                # Test with minimal dummy data for STT
+                test_data = b'\x00' * 320  # 20ms of silence at 16kHz
+                response = requests.post(self.urls[name],
+                                         data=test_data,
+                                         timeout=10,
+                                         headers={'Content-Type': 'application/octet-stream'})
+                return response.status_code == 200
+            elif name == "tts":
+                # Test with simple text
+                test_json = {"text": "test", "lang": "en"}
+                response = requests.post(self.urls[name], json=test_json, timeout=10)
+                return response.status_code == 200
+            elif name == "trans":
+                # Test with simple translation
+                test_json = {"text": "test", "src": "en", "dest": "de"}
+                response = requests.post(self.urls[name], json=test_json, timeout=10)
+                return response.status_code == 200
+            else:
+                return False
+        except requests.exceptions.ConnectionError:
+            # Service not yet available
+            return False
+        except requests.exceptions.Timeout:
+            # Service is responding but too slow
+            return False
+        except Exception as e:
+            # Other errors might indicate the service is not ready
+            return False
 
     def _stop_service(self, name):
+        """Stop a service process."""
         proc = self.services.get(name)
-        if proc and proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=5)
-            del self.services[name]
+        if proc:
+            if proc.poll() is None:  # Process is still running
+                print(f">>> Stopping {name} service...")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print(f">>> Force killing {name} service...")
+                    proc.kill()
+                    proc.wait()
+
+            # Clean up
+            if name in self.services:
+                del self.services[name]
+            if name in self.service_ready:
+                del self.service_ready[name]
+
+    def _record_loop(self):
+        """Audio recording loop with VAD."""
+        try:
+            vad = webrtcvad.Vad(2)
+            frame_len = int(16000 * 30 / 1000)  # 30ms frames
+            pre_buf = deque(maxlen=int(500 / 30))  # 500ms buffer
+            in_speech = False
+            silence_ct = 0
+            buffer = []
+
+            print(">>> Starting audio recording...")
+
+            with sd.InputStream(samplerate=16000, channels=1,
+                                dtype='int16', blocksize=frame_len) as stream:
+                while True:
+                    if not self.settings["use_stt"]: continue
+                    try:
+                        pcm_frame, _ = stream.read(frame_len)
+                        pcm_bytes = pcm_frame.tobytes()
+                        pre_buf.append(pcm_bytes)
+
+                        # Check for speech
+                        try:
+                            speech = vad.is_speech(pcm_bytes, 16000)
+                        except webrtcvad.Error:
+                            continue
+
+                        if speech:
+                            if not in_speech:
+                                print(">>> Speech detected, starting recording...")
+                                in_speech = True
+                                buffer = list(pre_buf)
+                            buffer.append(pcm_bytes)
+                            silence_ct = 0
+                        elif in_speech:
+                            buffer.append(pcm_bytes)
+                            silence_ct += 1
+                            if silence_ct * 30 >= 1000:  # 1 second of silence
+                                print(">>> Speech ended, processing audio...")
+                                # hand off to STT
+                                self.queues["stt"].put(b"".join(buffer))
+                                in_speech = False
+                                buffer = []
+                                silence_ct = 0
+                    except Exception as e:
+                        print(f"Error in recording loop: {e}")
+                        time.sleep(0.1)  # Brief pause before continuing
+
+        except Exception as e:
+            print(f"FATAL: Recording loop failed: {e}")
+            raise
