@@ -18,7 +18,7 @@ from Tools.scripts.objgraph import ignore
 
 from memory import MemoryDB
 
-
+from fetcher import InternetFetcher
 class KratixBrain:
     def __init__(self,
                  stt_url="http://localhost:8001/transcribe",
@@ -55,8 +55,6 @@ class KratixBrain:
             "use_tts": False,
             "use_stt": False,
         }
-        for k, value in self.memory.settings.items():
-            self.settings[k] = value
 
         # prepare worker threads
         self._threads = [
@@ -73,6 +71,8 @@ class KratixBrain:
         except FileNotFoundError:
             print("Warning: system_prompt.txt not found, using default")
             self.SYSTEM_PROMPT = "You are a helpful AI assistant."
+
+        self.fetcher = InternetFetcher(timeout=3.0, max_retries=2)
 
     def start(self):
         """Start all background threads."""
@@ -92,11 +92,12 @@ class KratixBrain:
 
     def call_chat(self, text: str, chat_id: str, user_id: str) -> str:
         ctx = ""
+        settings = ""
         facts = self.memory.retrieve(chat_id, user_id)
         if facts:
             ctx = "\n".join(f"{k}: {v}" for k, v in facts.items())
         try:
-            settings = "\n".join(f"{k}: {v}" for k, v in self.settings.items())
+            settings = "\n".join(f"{k}: {v}" for k, v in self.memory.settings.items())
         except:
             pass
 
@@ -120,7 +121,7 @@ class KratixBrain:
 
         try:
             # Check if LLM server is running
-            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=30)
+            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=60)
             print(f"DEBUG: LLM response status: {r.status_code}")
             if r.status_code != 200:
                 print(f"DEBUG: LLM response text: {r.text}")
@@ -138,8 +139,9 @@ class KratixBrain:
             print(f"ERROR: Unexpected error calling LLM: {e}")
             return "Entschuldigung, es gab einen unerwarteten Fehler."
 
-        sep = '###' if '###' in full else  '<-->'
-        sep = '´´´' if '´´´' in full else sep
+        sep: str = '###' if '###' in full else '<-->'
+        sep = '```' if '```' in full else sep
+        print(full)
         if sep in full:
             answer, raw = full.split(sep, 1)
             # strip everything outside the first {...}
@@ -158,7 +160,7 @@ class KratixBrain:
                     print(f"Warning: Could not parse JSON: {e}")
         else:
             answer = full
-
+        answer = answer.replace(sep, "")
         # 6) append assistant to history
         self.history[chat_id].append({"role": "assistant", "content": answer.strip()})
         # 7) prune old turns
