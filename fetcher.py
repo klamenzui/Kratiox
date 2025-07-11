@@ -4,7 +4,8 @@ import requests
 from functools import lru_cache
 from urllib.parse import urljoin
 from requests.exceptions import RequestException
-from googlesearch import search
+#from googlesearch import search
+from ddgs import DDGS
 try:
     from bs4 import BeautifulSoup
 
@@ -85,17 +86,24 @@ class InternetFetcher:
             raise RuntimeError("BeautifulSoup (bs4) nicht installiert")
         return BeautifulSoup(text, "html.parser")
 
-    def google_search(self, query: str, num: int = 3) -> dict:
+    def web_search(self, params) -> str:
         """
         Gibt die URLs der ersten 'num' Google-Treffer zurück.
         """
-        res = {}
-        urls = list(search(query, num_results=num, unique=True))
-        print("\n".join(urls) or f"Keine Treffer für «{query}».")
-        for url in urls:
-            try:
-                res[url] = self.get_text(url)
-            except Exception as e:
-                print(e)
-
-        return res
+        """
+            Führt eine DuckDuckGo-Suche durch und gibt Title+Snippet + URL der Top-Ergebnisse zurück.
+            """
+        results = DDGS().text(**params)
+        if not results:
+            return f"Keine Ergebnisse gefunden für «{params}»."
+        lines = []
+        i = 0
+        for r in results:
+            title = r.get("title", "").strip()
+            body = r.get("body", "").strip()  # kurzer Auszug
+            url = r.get("href", "").strip()
+            lines.append(f"{title}\n{body}\n{url}\n")
+            with open(f"{i}.dd.html", "w", encoding="utf-8") as f:
+                f.write(f"{title}\n{body}\n{url}\n")
+            i += 1
+        return "\n - ".join(lines)

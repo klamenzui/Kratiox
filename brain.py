@@ -51,6 +51,7 @@ class KratixBrain:
         self.settings = {
             "curr_lang": "de",
             "dest_lang": "en",
+            "use_telegram": True,
             "use_translate": False,
             "use_tts": False,
             "use_stt": False,
@@ -90,7 +91,7 @@ class KratixBrain:
                                              f"Known data: Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M}Z \n"
                                              f"{facts}\nSettings:{settings}"}
 
-    def call_chat(self, text: str, chat_id: str, user_id: str) -> str:
+    def call_chat(self, text: str, chat_id: str, user_id: str, searched: bool = False) -> str:
         ctx = ""
         settings = ""
         facts = self.memory.retrieve(chat_id, user_id)
@@ -156,6 +157,12 @@ class KratixBrain:
                         self.memory.store_facts(chat_id, user_id, obj["facts"])
                     if obj.get("settings"):
                         self.memory.store_settings(obj["settings"])
+                    if obj.get("action"):
+                        action = obj.get("action")
+                        if action.get("name") == "search" and not searched:
+                            if action.get("type") == "text":
+                                results = self.fetcher.web_search(action.get("args"))
+                                return self.call_chat(f"Analyse search results: {results}", chat_id, user_id, True)
                 except json.JSONDecodeError as e:
                     print(f"Warning: Could not parse JSON: {e}")
         else:
