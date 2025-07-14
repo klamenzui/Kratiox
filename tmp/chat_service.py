@@ -1,0 +1,194 @@
+# chat_service.py
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import re, requests, datetime
+from datetime import datetime
+import subprocess
+from memory import MemoryDB
+import json
+# zum Start:
+# uvicorn chat_service:app --host 0.0.0.0 --port 8004
+# ollama serve
+# ollama run llama3.2:latest
+# deepseek-r1 | llama3.2 | devstral | llama4 |codellama | gemma3:4b-it-q4_K_M
+# =============================
+# Ollama-Integration
+# =============================
+
+
+AI_URL = "http://127.0.0.1:1234/v1/chat/completions"  # "http://localhost:11434/api/chat"
+AI_MODEL = "google/gemma-3-12b"  # "deepseek-r1-distill-qwen-7b" # "qwen2.5-coder-14b-instruct"  # "gemma3n:latest"#deepseek-r1:8b  # "gemma3n:latest"#"llama3.3" #"gemma3:4b-it-q4_K_M"
+
+memory = MemoryDB()
+app = FastAPI()
+# Chat-History pro Nutzer (z.B. per chat_id) im Speicher
+history = {}
+MAX_TURNS = 8  # z.B. 8 user+assistant-Paare
+# System-Prompt nur einmal pro chat_id initial setzen
+# === Prompt aus Datei laden ===
+PROMPT_FILE = "./prompts/en/system_prompt.txt"
+SYSTEM_PROMPT = ''
+try:
+    with open(PROMPT_FILE, "r", encoding="utf-8") as f:
+        SYSTEM_PROMPT = f.read().strip()
+except Exception as e:
+    print(f"System-Prompt file not found: {PROMPT_FILE}: {e}")
+
+
+def ensure_model(model: str):
+    # Liste aller derzeit geladenen Modelle abrufen
+    res = subprocess.run(
+        ["ollama", "list"], capture_output=True, text=True, check=True
+    )
+    installed = res.stdout  # enthält Modellnamen, einen pro Zeile
+    print("installed:")
+    print(installed)
+    if model not in installed:
+        print(f"Modell {model} nicht gefunden – lade es herunter …")
+        subprocess.run(
+            ["ollama", "run", model], check=True
+        )
+        print("Download abgeschlossen.")
+    res = subprocess.run(
+        ["ollama", "ps"], capture_output=True, text=True, check=True
+    )
+    print("ps:")
+    print(res.stdout)
+
+
+def strip_think_blocks(text: str) -> str:
+    # DOTALL sorgt dafür, dass auch Zeilenumbrüche von . erfasst werden
+    pattern = re.compile(r'<think>.*?</think>', flags=re.DOTALL)
+    return pattern.sub('', text)
+
+
+def get_datetime_message():
+    now = datetime.now()
+    # Hier das deutsche Format, du kannst es natürlich anpassen
+    return {
+        "role": "system",
+        #"content": f"Текущая дата: {now:%Y-%m-%d}. Текущее время: {now:%H:%M} Uhr."
+        "content": f"Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M} Uhr."
+    }
+
+
+def prune_history(chat_id):
+    msgs = history[chat_id]
+    # System-Prompt bleibt immer an Position 0
+    sys, turns = msgs[0], msgs[1:]
+    # nimm nur die letzten MAX_TURNS
+    pruned = turns[-MAX_TURNS * 2:]  # *2, weil jede Runde User+Assistant
+    history[chat_id] = [sys] + pruned
+
+
+class ChatRequest(BaseModel):
+    chat_id: str  # eindeutige Konversation
+    user: str
+    message: str  # neue User-Nachricht
+
+
+class ChatResponse(BaseModel):
+    reply: str  # Assistant-Antwort
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    global SYSTEM_PROMPT
+    chat_id, user_id, text = req.chat_id, req.user, req.message
+
+    # 1) Relevante Fact-Types finden (die Keys, die wir später speichern)
+    #    Statt Keyword-Suche hier leer lassen oder eigene Logik implementieren.
+    #    Wir nutzen die vorher gespeicherten fact_types als ftypes:
+    #    Deshalb rufen wir retrieve ohne ftypes, um alle bisherigen fact_types zu sehen.
+    prev = memory.retrieve(chat_id, user_id)  # dict fact_type->value
+    needed_types = list(prev.keys())
+
+    # 2) Baue den Prompt
+    if chat_id not in history:
+        history[chat_id] = [
+            {"role": "system", "content": SYSTEM_PROMPT}
+        ]
+    # Füge Kontext-Facts dieses Users hinzu
+    if needed_types:
+        ctx_lines = "\n".join(f"{k}: {v}" for k, v in prev.items())
+    else:
+        ctx_lines = "Keine früheren Fakten."
+
+    # 3) Anfrage an Ollama
+    payload = {
+        "model": AI_MODEL,
+        "stream": False,
+        #"stream": True,
+        "messages": history[chat_id] + [get_datetime_message(),{"role": "system", "content": ctx_lines}, {"role": "user", "content": text}]
+    }
+    # Füge die neue User-Nachricht hinzu
+    history[chat_id].append({"role": "user", "content": text})
+    prune_history(chat_id)
+    try:
+        print(payload)
+        resp = requests.post(AI_URL, json=payload, timeout=55)
+        if resp.status_code != 200:
+            print("Ollama-Error:", resp.status_code, resp.text)
+        resp.raise_for_status()
+        data = resp.json()
+        # full = data.get("message", {}).get("content").strip()
+        full = data.get("choices", [{
+            "message": {
+                "content": ""
+            }
+        }])[0].get("message", {}).get("content", {}).strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ollama-Fehler: {e}")
+    print(full)
+    if "deepseek" in AI_MODEL:
+        full = strip_think_blocks(full)
+    # 4) Split in Antwort und Facts-Teil
+    sep = "<-->" if "<-->" in full else ""
+    sep = "```" if "```" in full else sep
+    if sep:
+        # answer, facts_part = full.split(sep, 1)
+        answer, payload_json = full.split(sep, 1)
+        """
+        Schneidet alles vor dem ersten '{' und nach dem letzten '}' ab,
+        parst den mittleren String als JSON und gibt das Dict zurück.
+        """
+        start = payload_json.find('{')
+        end   = payload_json.rfind('}')
+        if start == -1 or end == -1:
+            print("Kein JSON-Block gefunden")
+        else:
+            payload_json = payload_json[start:end+1]
+        print(payload_json)
+        data = json.loads(payload_json)
+
+        # 1) send answer back to user
+        if data.get("facts"): # memory.store_facts(...)
+            facts = {}
+            for line in data.get("facts").strip().splitlines():
+                if ":" in line:
+                    key, val = line.split(":", 1)
+                    facts[key.strip().lower()] = val.strip()
+            # 5) Speichere scoped Facts
+            print("facts", facts)
+            if facts:
+                memory.store_facts(chat_id, user_id, facts)
+        if data.get("settings"): print(f'settings_service.update({data["settings"]})')
+        if data.get("task"): print(f'task_service.create({data["task"]})')
+        if data.get("action"): print(f'search_results = search_service.search({data["action"]["query"]})')
+
+    else:
+        answer = full
+    answer = answer.replace(sep, "")
+    history[chat_id].append({"role": "assistant", "content": answer})
+    print("store", memory.store)
+    # 6) Speichere Assistant-Turn in history
+    # history[chat_id].append({"role":"assistant", "content": answer.strip()})
+    # prune_history(chat_id)
+
+    return ChatResponse(reply=answer.strip())
+
+
+if __name__ == "__main__":
+    # ensure_model(AI_MODEL)
+    uvicorn.run("chat_service:app", host="0.0.0.0", port=8004)

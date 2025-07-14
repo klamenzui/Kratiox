@@ -14,10 +14,10 @@ class MemoryDB:
                 content = file.read()
                 self.store = json.loads(content)
 
-        if os.path.exists(self.memory_path):
-            with open(self.memory_path, "r") as file:
+        if os.path.exists(self.settings_path):
+            with open(self.settings_path, "r") as file:
                 content = file.read()
-                self.store = json.loads(content)
+                self.settings = json.loads(content)
 
     def store_facts(self, chat_id: str, user_id: str, facts: dict):
         """Fügt nur hinzu wenn Wert sich geändert hat."""
