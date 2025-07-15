@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import os
 from io import BytesIO
-
+import base64
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
@@ -30,6 +30,7 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("start", self.start))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
         self.app.add_handler(MessageHandler(filters.VOICE, self.on_voice))
+        self.app.add_handler(MessageHandler(filters.PHOTO, self.on_photo))
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Hallo! Ich bin Kratix, dein KI‐Assistent.")
@@ -77,6 +78,26 @@ class TelegramBot:
         opus_buf.seek(0)
 
         await context.bot.send_voice(chat_id, voice=opus_buf)
+
+    async def on_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # 1) Bild als Bytearray herunterladen
+        user = update.effective_user
+        name = user.username or f"{user.first_name} {user.last_name}".strip()
+        chat_id = update.effective_chat.id
+        photo = update.message.photo[-1]
+        file = await photo.get_file()
+        img_bytes = await file.download_as_bytearray()
+
+        # 2) In Base64 + data-URI kodieren
+        b64 = base64.b64encode(img_bytes).decode("ascii")
+        data_uri = f"data:image/jpeg;base64,{b64}"
+        messages = [{"type": "text", "text": update.message.caption}] if update.message.caption else []
+        messages.append({"type": "image_url", "image_url": {"url": data_uri}})
+        try:
+            reply = self.brain.call_chat(messages, chat_id=str(chat_id), user_id=name)
+            await update.message.reply_text(reply)
+        except Exception as e:
+            print(e)
 
     def run(self):
         print("⭐ Telegram‐Bot läuft…")

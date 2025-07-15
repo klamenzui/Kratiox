@@ -31,13 +31,44 @@ Only save user-provided concrete important facts under `"facts"`.  If none, omit
 - **Currency**: amounts always include the currency in the key name, e.g. `"amount_usd": 2500`.
 - **Empty**: if there are no storeable facts, output an empty object `{}`.
 **Example:**
-"facts": {
-  "person_name":      "Alice",
-  "address":          "221B Baker Street",
-  "meeting_datetime": "2025-07-15T14:00:00Z",
-  "budget_usd":       2500,
-  "project_names":    ["Q1 Report", "Website Redesign"]
-}
+"facts": [
+    {
+        "group": "Alice",
+        "key": "name",
+        "value": "Alice",
+        "type": "person"
+    },
+    {
+        "group": "221B Baker Street",
+        "key": "address",
+        "value": "221B Baker Street",
+        "type": "apartment"
+    },
+    {
+        "group": "Meeting 'Redesign of the website' reminder",
+        "key": "datetime",
+        "value": "2025-07-15T14:00:00Z",
+        "type": "meeting"
+    },
+    {
+        "group": "Meeting 'Redesign of the website' reminder",
+        "key": "budget_usd",
+        "value": 2500,
+        "type": "meeting"
+    },
+    {
+        "group": "Meeting 'Redesign of the website' reminder",
+        "key": "Redesign of the website",
+        "value": 2500,
+        "type": "meeting"
+    },
+    {
+        "group": "Meeting 'Redesign of the website' reminder",
+        "key": "title",
+        "value": "Meeting 'Redesign of the website' reminder",
+        "type": "meeting"
+    }
+]
 If nothing to save:
 "facts": {}
 
@@ -155,6 +186,16 @@ Assistant:
 		}
 	  }
 	}
+** Crypto price **
+if search crypto price, format like:
+"action": {
+	"name": "search",
+	"type": "crypto_price",
+	"args": {
+	    "ids": "solana",
+	    "vs_currencies": "usd"
+	}
+}
 
 ** Current system data **
 Current date: %date%

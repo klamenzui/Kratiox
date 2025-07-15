@@ -15,6 +15,7 @@ import sounddevice as sd
 import webrtcvad
 import numpy as np
 from Tools.scripts.objgraph import ignore
+from numba.np.numpy_support import is_array
 
 from memory import MemoryDB
 
@@ -105,11 +106,10 @@ class KratixBrain:
         with open(f"./prompts/{self.settings.get('curr_lang', 'en')}/{name}.txt", "r", encoding="utf-8") as f:
             message = f.read().strip()
         for k, v in prompt_data.items():
-            message = message.replace(f'%{k}%', v)
+            message = message.replace(f'%{k}%', f'{v}')
         return message
 
-    def call_chat(self, text: str, chat_id: str, user_id: str, searched: bool = False) -> str:
-
+    def call_chat(self, text: any, chat_id: str, user_id: str, searched: bool = False) -> str:
         sys_message = self.get_system_message(chat_id, user_id)
         if chat_id not in self.history:
             self.history[chat_id] = [sys_message]
@@ -174,11 +174,20 @@ class KratixBrain:
                             if action.get("type") == "text":
                                 results = self.fetcher.web_search(action.get("args"))
                                 print("web search: ", action)
-
+                                #messages = [
+                                #    {"type": "text", "text": answer}] if answer else []
+                                # messages.append({"type": "text","text": })
                                 return self.call_chat(self.get_tpl_message("web_search", {
-                                    "query": action.get("args", {}).get('query'),
+                                            "query": action.get("args", {}).get('query'),
+                                            "results": results,
+                                        }), chat_id, user_id, True)
+                            if action.get("type") == "crypto_price":
+                                results = self.fetcher.get_crypto_price(action.get("args"))
+                                return self.call_chat(self.get_tpl_message("web_search", {
+                                    "query": action.get("args", {}).get('ids'),
                                     "results": results,
                                 }), chat_id, user_id, True)
+
                 except json.JSONDecodeError as e:
                     print(f"Warning: Could not parse JSON: {e}")
         else:

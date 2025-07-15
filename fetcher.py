@@ -107,3 +107,13 @@ class InternetFetcher:
                 f.write(f"{title}\n{body}\n{url}\n")
             i += 1
         return "\n - ".join(lines)
+
+    def get_crypto_price(self, params):
+        # Beispiel: hole Coin-Preise von CoinGecko
+        data = self.get_json(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": "solana", "vs_currencies": "usd"}
+        )
+        print(data)
+        price = data.get("solana", {}).get("usd")
+        return price
