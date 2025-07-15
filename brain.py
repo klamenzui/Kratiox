@@ -6,7 +6,7 @@ import sys
 import threading
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from queue import Queue
 from collections import deque
 
@@ -86,23 +86,20 @@ class KratixBrain:
             self._stop_service(name)
 
     def get_system_message(self, facts, settings):
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         return {"role": "system", "content": f"{self.SYSTEM_PROMPT}\n"
                                              f"Known data: Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M}Z \n"
                                              f"{facts}\nSettings:{settings}"}
 
     def call_chat(self, text: str, chat_id: str, user_id: str, searched: bool = False) -> str:
-        ctx = ""
-        settings = ""
-        facts = self.memory.retrieve(chat_id, user_id)
-        if facts:
-            ctx = "\n".join(f"{k}: {v}" for k, v in facts.items())
-        try:
-            settings = "\n".join(f"{k}: {v}" for k, v in self.memory.settings.items())
-        except:
-            pass
+        #history = self.memory.get_fact_history(chat_id, user_id, "company_name")
+        facts = self.memory.get_latest_facts(chat_id, user_id)
+        ctx = "\n".join(f"{k}: {v!r}" for k, v in facts.items()) if facts else ""
 
-        sys_message = self.get_system_message(ctx, settings)
+        settings = self.memory.get_settings(user_id)
+        settings_str = "\n".join(f"{k}: {v!r}" for k, v in settings.items()) if settings else ""
+
+        sys_message = self.get_system_message(ctx, settings_str)
         if chat_id not in self.history:
             self.history[chat_id] = [sys_message]
         else:
@@ -140,10 +137,11 @@ class KratixBrain:
             print(f"ERROR: Unexpected error calling LLM: {e}")
             return "Entschuldigung, es gab einen unerwarteten Fehler."
 
-        sep: str = '###' if '###' in full else '<-->'
-        sep = '```' if '```' in full else sep
-        print(full)
-        if sep in full:
+        sep: str = '###' if '###' in full else ''
+        sep = '<-->' if not sep and '<-->' in full else ''
+        sep = '```' if not sep and '```' in full else sep
+        print(sep, full)
+        if sep and sep in full:
             answer, raw = full.split(sep, 1)
             # strip everything outside the first {...}
             start, end = raw.find("{"), raw.rfind("}")
@@ -156,13 +154,14 @@ class KratixBrain:
                     if obj.get("facts"):
                         self.memory.store_facts(chat_id, user_id, obj["facts"])
                     if obj.get("settings"):
-                        self.memory.store_settings(obj["settings"])
+                        self.memory.store_settings(user_id, obj["settings"])
                     if obj.get("action"):
                         action = obj.get("action")
                         if action.get("name") == "search" and not searched:
                             if action.get("type") == "text":
                                 results = self.fetcher.web_search(action.get("args"))
-                                return self.call_chat(f"Analyse search results: {results}", chat_id, user_id, True)
+                                print("web search: ", action)
+                                return self.call_chat(f"Analyse search results, are there exist info for '{action.get('args', {}).get('query')}': {results}", chat_id, user_id, True)
                 except json.JSONDecodeError as e:
                     print(f"Warning: Could not parse JSON: {e}")
         else:
