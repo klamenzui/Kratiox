@@ -74,27 +74,10 @@ class Test:
 #print(Test().some_api_call())
 #print(Test().google_search("weather in Hemau Germany today"))
 
-from ddgs import DDGS
 
-def web_search(query: str, region=None, max_results: int = 3) -> str:
-    """
-    Führt eine DuckDuckGo-Suche durch und gibt Title+Snippet + URL der Top-Ergebnisse zurück.
-    """
-    results = DDGS().text(query, region=region, max_results=max_results)
-    if not results:
-        return f"Keine Ergebnisse gefunden für «{query}»."
-    lines = []
-    i=0
-    for r in results:
-        title = r.get("title", "").strip()
-        body  = r.get("body", "").strip()    # kurzer Auszug
-        url   = r.get("href", "").strip()
-        lines.append(f"{title}\n{body}\n{url}\n")
-        with open(f"{i}.dd.html", "w", encoding="utf-8") as f:
-            f.write(f"{title}\n{body}\n{url}\n")
-        i+=1
-    return "\n".join(lines)
 
-web_search("weather in Hemau Germany", "de-DE")
+#web_search("weather in Hemau Germany", "de-DE")
 #web_search("sol price")
 #web_search("what is python")
+fetcher = InternetFetcher()
+fetcher.web_search({'query': 'current president of USA', 'region': 'us-en', 'timelimit': 'd', 'max_results': 3})

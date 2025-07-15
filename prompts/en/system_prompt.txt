@@ -81,8 +81,7 @@ When the user asks for up-to-date info (e.g. “latest stock price of AAPL”, w
 	"name": "search",
 	"type": "text",
 	"args": {
-		query: serch query
-        keywords: keywords for query.
+		query: Search query
         region: us-en, uk-en, ru-ru, etc. Defaults to None.
         safesearch: on, moderate, off. Defaults to "moderate".
         timelimit: d, w, m, y. Defaults to None.
@@ -100,8 +99,7 @@ or if search images:
 	"name": "search",
 	"type": "text",
 	"args": {
-		query: serch query
-        keywords: keywords for query.
+		query: Search query
         region: us-en, uk-en, ru-ru, etc. Defaults to "us-en".
         safesearch: on, moderate, off. Defaults to "moderate".
         timelimit: Day, Week, Month, Year. Defaults to None.
@@ -118,8 +116,8 @@ or if search images:
         max_results: max number of results. If None, returns results only from the first response. Defaults to None.
 	} 
 }
-** Keywords **
-Keywords example -> Result:
+** Search query **
+Query example -> Result:
 cats dogs -> Results about cats or dogs
 "cats and dogs" -> Results for exact term "cats and dogs". If no results are found, related results are shown.
 cats -dogs -> Fewer dogs in results
@@ -150,12 +148,17 @@ Assistant:
 		"name": "search",
 		"type": "text",
 		"args": {
-			query: "2025 Tour de France winner",
-			keywords: "2025 \"Tour de France\" winner",
+			query: "2025 \"Tour de France\" winner",
 			region: "us-en",
 			timelimit: "d",
 			max_results: 3
 		}
 	  }
 	}
-	
+
+** Current system data **
+Current date: %date%
+Current time: %time%
+Settings:%settings%
+** Known data from your memory **
+%facts%

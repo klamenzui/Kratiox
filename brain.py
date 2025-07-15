@@ -19,6 +19,8 @@ from Tools.scripts.objgraph import ignore
 from memory import MemoryDB
 
 from fetcher import InternetFetcher
+
+
 class KratixBrain:
     def __init__(self,
                  stt_url="http://localhost:8001/transcribe",
@@ -49,8 +51,8 @@ class KratixBrain:
 
         # settings (current and dest languages, toggles, etc.)
         self.settings = {
-            "curr_lang": "de",
-            "dest_lang": "en",
+            "curr_lang": "en",
+            "dest_lang": "de",
             "use_telegram": True,
             "use_translate": False,
             "use_tts": False,
@@ -65,13 +67,6 @@ class KratixBrain:
             threading.Thread(target=self._tts_loop, daemon=True),
         ]
         self.history = {}  # chat_id → [ messages ]
-        # load system prompt once
-        try:
-            with open("./prompts/en/system_prompt.txt", "r", encoding="utf-8") as f:
-                self.SYSTEM_PROMPT = f.read().strip()
-        except FileNotFoundError:
-            print("Warning: system_prompt.txt not found, using default")
-            self.SYSTEM_PROMPT = "You are a helpful AI assistant."
 
         self.fetcher = InternetFetcher(timeout=3.0, max_retries=2)
 
@@ -85,21 +80,37 @@ class KratixBrain:
         for name in list(self.services):
             self._stop_service(name)
 
-    def get_system_message(self, facts, settings):
+    def get_system_message(self, chat_id, user_id):
+        # history = self.memory.get_fact_history(chat_id, user_id, "company_name")
+        facts_dict = self.memory.get_latest_facts(chat_id, user_id)
+        facts = "\n".join(f"{k}: {v!r}" for k, v in facts_dict.items()) if facts_dict else ""
+
+        settings_dict = self.memory.get_settings(user_id)
+        settings = "\n".join(f"{k}: {v!r}" for k, v in settings_dict.items()) if settings_dict else ""
         now = datetime.now(timezone.utc)
-        return {"role": "system", "content": f"{self.SYSTEM_PROMPT}\n"
-                                             f"Known data: Current date: {now:%Y-%m-%d}. Current time: {now:%H:%M}Z \n"
-                                             f"{facts}\nSettings:{settings}"}
+        try:
+            sys_prompt = self.get_tpl_message("system_prompt", {
+                "date": f"{now:%Y-%m-%d}",
+                "time": f"{now:%H:%M}Z",
+                "facts": facts,
+                "settings": settings
+            })
+        except FileNotFoundError:
+            print("Warning: system_prompt.txt not found, using default")
+            sys_prompt = "You are a helpful AI assistant."
+        return {"role": "system", "content": sys_prompt}
+
+    def get_tpl_message(self, name, prompt_data):
+        message = ""
+        with open(f"./prompts/{self.settings.get('curr_lang', 'en')}/{name}.txt", "r", encoding="utf-8") as f:
+            message = f.read().strip()
+        for k, v in prompt_data.items():
+            message = message.replace(f'%{k}%', v)
+        return message
 
     def call_chat(self, text: str, chat_id: str, user_id: str, searched: bool = False) -> str:
-        #history = self.memory.get_fact_history(chat_id, user_id, "company_name")
-        facts = self.memory.get_latest_facts(chat_id, user_id)
-        ctx = "\n".join(f"{k}: {v!r}" for k, v in facts.items()) if facts else ""
 
-        settings = self.memory.get_settings(user_id)
-        settings_str = "\n".join(f"{k}: {v!r}" for k, v in settings.items()) if settings else ""
-
-        sys_message = self.get_system_message(ctx, settings_str)
+        sys_message = self.get_system_message(chat_id, user_id)
         if chat_id not in self.history:
             self.history[chat_id] = [sys_message]
         else:
@@ -119,7 +130,7 @@ class KratixBrain:
 
         try:
             # Check if LLM server is running
-            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=60)
+            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=180)
             print(f"DEBUG: LLM response status: {r.status_code}")
             if r.status_code != 200:
                 print(f"DEBUG: LLM response text: {r.text}")
@@ -138,7 +149,9 @@ class KratixBrain:
             return "Entschuldigung, es gab einen unerwarteten Fehler."
 
         sep: str = '###' if '###' in full else ''
+        print(sep)
         sep = '<-->' if not sep and '<-->' in full else ''
+        print(sep)
         sep = '```' if not sep and '```' in full else sep
         print(sep, full)
         if sep and sep in full:
@@ -161,7 +174,11 @@ class KratixBrain:
                             if action.get("type") == "text":
                                 results = self.fetcher.web_search(action.get("args"))
                                 print("web search: ", action)
-                                return self.call_chat(f"Analyse search results, are there exist info for '{action.get('args', {}).get('query')}': {results}", chat_id, user_id, True)
+
+                                return self.call_chat(self.get_tpl_message("web_search", {
+                                    "query": action.get("args", {}).get('query'),
+                                    "results": results,
+                                }), chat_id, user_id, True)
                 except json.JSONDecodeError as e:
                     print(f"Warning: Could not parse JSON: {e}")
         else:

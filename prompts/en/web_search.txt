@@ -1,0 +1,1 @@
+Analyze the search results to see if there is any information on the topic of '%query%' and select the most relevant URLs (add them after your answer after 'links:'): %results%

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+
 class MemoryDB:
     def __init__(self, db_path: str = "memory.db"):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -20,7 +21,7 @@ class MemoryDB:
             value     TEXT NOT NULL,       -- JSON-serialized
             timestamp TEXT NOT NULL        -- ISO 8601
         );""")
-        #-- verhindert doppelte Zeilen für identische (chat_id, user_id, fact_type, value)
+        # -- verhindert doppelte Zeilen für identische (chat_id, user_id, fact_type, value)
         c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_facts_unique
           ON facts(chat_id, user_id, fact_type, value);
         """)
@@ -50,7 +51,7 @@ class MemoryDB:
     def get_latest_facts(self,
                          chat_id: str,
                          user_id: str
-                        ) -> Dict[str, Any]:
+                         ) -> Dict[str, Any]:
         """
         Liefert für jeden fact_type den neuesten Wert.
         Rückgabe: { fact_type: value, … }
@@ -76,7 +77,7 @@ class MemoryDB:
                          chat_id: str,
                          user_id: str,
                          fact_type: str
-                        ) -> List[Dict[str, Any]]:
+                         ) -> List[Dict[str, Any]]:
         """
         Historie für einen fact_type:
         [ {"value":…, "timestamp":…}, … ]
@@ -93,7 +94,7 @@ class MemoryDB:
             for val, ts in c.fetchall()
         ]
 
-    def store_settings(self, user_id: str, settings: Dict[str,Any]):
+    def store_settings(self, user_id: str, settings: Dict[str, Any]):
         data = json.dumps(settings, ensure_ascii=False)
         self.conn.execute("""
         INSERT INTO settings (user_id,data) VALUES (?,?)
@@ -101,7 +102,7 @@ class MemoryDB:
         """, (user_id, data))
         self.conn.commit()
 
-    def get_settings(self, user_id: str) -> Dict[str,Any]:
+    def get_settings(self, user_id: str) -> Dict[str, Any]:
         c = self.conn.cursor()
         c.execute("SELECT data FROM settings WHERE user_id=?", (user_id,))
         row = c.fetchone()

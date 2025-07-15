@@ -1,0 +1,1 @@
+Analysiere die Suchergebnisse nach Informationen zu '%query%' und wähle die relevantesten URLs aus (füge diese nach dem „links:“ in deiner Antwort ein): %results%.
