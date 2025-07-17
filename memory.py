@@ -12,11 +12,12 @@ class MemoryDB:
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 
-    def resolve_group_id(self, raw_gid: str) -> str:
+    def resolve_group_id(self,chat_id , user_id, raw_gid: str) -> str:
+        g = self.get_group(chat_id , user_id, raw_gid.replace("?", ""))
         # wenn neu, Raw beginnt mit '?'
-        if raw_gid.startswith("?"):
+        if not g:
             return uuid4().hex
-        return raw_gid
+        return g["group_id"]
 
     def _init_schema(self):
         c = self.conn.cursor()
@@ -55,7 +56,7 @@ class MemoryDB:
         """
         Legt einen neuen Fact in der Gruppe an.
         """
-        ts = datetime.utcnow().isoformat() + "Z"
+        ts = datetime.now(timezone.utc).isoformat() + "Z"
         val_j = json.dumps(value, ensure_ascii=False)
         self.conn.execute("""
             INSERT INTO facts (group_id, key, value, timestamp)
@@ -81,7 +82,7 @@ class MemoryDB:
         new_ids = {}
         for grp in array:
             raw_gid = grp["group_id"]
-            grp_id = self.resolve_group_id(raw_gid)  # löst "?abcd" → echte ID
+            grp_id = self.resolve_group_id(chat_id, user_id, raw_gid)  # löst "?abcd" → echte ID
             new_ids[grp_id] = raw_gid
             parent_id = grp.get("parent_id")
             if parent_id:
@@ -113,6 +114,38 @@ class MemoryDB:
                     value=val
                 )
 
+    def get_group(self, chat_id: str,
+                   user_id: str,
+                   group_id: str ):
+        c = self.conn.cursor()
+        c.execute("""
+                        SELECT group_id, type, parent_id
+                        FROM groups
+                        WHERE chat_id=? AND user_id=? AND group_id=?
+                        ORDER BY created_at ASC
+                    """, (chat_id, user_id, group_id))
+        return c.fetchone()
+
+
+    def get_groups(self,chat_id: str,
+                     user_id: str):
+        c = self.conn.cursor()
+        c.execute("""
+                        SELECT group_id, type, parent_id
+                        FROM groups
+                        WHERE chat_id=? AND user_id=?
+                        ORDER BY created_at ASC
+                    """, (chat_id, user_id))
+        groups = {
+            row["group_id"]: {
+                "group_id": row["group_id"],
+                "type": row["type"],
+                "parent_id": row["parent_id"]
+            }
+            for row in c.fetchall()
+        }
+        return groups
+
     def ensure_group(self,
                      group_id: str,
                      chat_id: str,
@@ -123,7 +156,7 @@ class MemoryDB:
         Legt eine Gruppe an, wenn sie nicht existiert.
         Falls parent_id übergeben wird, wird sie gespeichert.
         """
-        ts = datetime.utcnow().isoformat() + "Z"
+        ts = datetime.now(timezone.utc).isoformat() + "Z"
         self.conn.execute("""
             INSERT INTO groups (group_id, chat_id, user_id, type, parent_id, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -150,20 +183,7 @@ class MemoryDB:
         """
         c = self.conn.cursor()
         # 1) Alle Gruppen des Users holen
-        c.execute("""
-            SELECT group_id, type, parent_id
-            FROM groups
-            WHERE chat_id=? AND user_id=?
-            ORDER BY created_at ASC
-        """, (chat_id, user_id))
-        groups = {
-            row["group_id"]: {
-                "group_id": row["group_id"],
-                "type": row["type"],
-                "parent_id": row["parent_id"]
-            }
-            for row in c.fetchall()
-        }
+        groups = self.get_groups(chat_id, user_id)
         if not groups:
             return {}
 
