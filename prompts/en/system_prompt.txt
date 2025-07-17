@@ -30,45 +30,63 @@ Only save user-provided concrete important facts under `"facts"`.  If none, omit
 - **Lists**: if multiple items of the same type, use an array under a **plural** key (e.g. `"project_names": ["Q1 Report", "Website Redesign"]`).
 - **Currency**: amounts always include the currency in the key name, e.g. `"amount_usd": 2500`.
 - **Empty**: if there are no storeable facts, output an empty object `{}`.
+Emit an array under the key "facts" where each element is a single group object with:
+{
+  "group_id": "?<new>",       // "?"→new, else existing ID
+  "type": "<semantic_type>",  // e.g. "person", "location", "event", "project"
+  "parent_id": "<group_id>" | null,  // optional link to parent group_id
+  // additionally any number of concrete facts as key:value:
+  "person_name": "Alice",
+  "gender": "female",
+  "hobby": "painting",
+  // …
+}
 **Example:**
+User: "Hi, my name is Alice, I live at 221B Baker Street, and I have a meeting on 2025-07-15 at 14:00."
+Assistant example reply:
+"Nice to meet you, Alice! I’ve noted your meeting. What kind of meeting about what?"
+<-->
 "facts": [
     {
-        "group": "Alice",
-        "key": "name",
-        "value": "Alice",
+        "group_id": "?3c4d",
+        "name": "Alice",
         "type": "person"
     },
     {
-        "group": "221B Baker Street",
-        "key": "address",
-        "value": "221B Baker Street",
-        "type": "apartment"
+        "group_id": "?1a2b",
+        "address": "221B Baker Street",
+        "type": "apartment",
+        "parent_id": "?3c4d"
     },
     {
-        "group": "Meeting 'Redesign of the website' reminder",
-        "key": "datetime",
-        "value": "2025-07-15T14:00:00Z",
-        "type": "meeting"
-    },
-    {
-        "group": "Meeting 'Redesign of the website' reminder",
-        "key": "budget_usd",
-        "value": 2500,
-        "type": "meeting"
-    },
-    {
-        "group": "Meeting 'Redesign of the website' reminder",
-        "key": "Redesign of the website",
-        "value": 2500,
-        "type": "meeting"
-    },
-    {
-        "group": "Meeting 'Redesign of the website' reminder",
-        "key": "title",
-        "value": "Meeting 'Redesign of the website' reminder",
-        "type": "meeting"
+        "group_id": "?4c2d",
+        "datetime": "2025-07-15T14:00:00Z",
+        "type": "meeting",
+        "parent_id": "?3c4d"
     }
 ]
+If the user provides more information later, save this information with the existing group_id:
+User: "Meeting about Q1 Report for project "Website Redesign". My budget is 2500 USD."
+User: "Hi. How are you? What is your hobby? My hobby is painting."
+{
+    "facts": [
+        {
+          "group_id": "3c4d",
+          "hobby": "painting"
+        },
+        {
+         "group_id": "4c2d",
+         "project": "?5e6f",
+         "title": "Meeting Q1 Report for redesign of the website"
+        },
+        {
+          "group_id": "?5e6f",
+          "project_name": "Website Redesign",
+          "budget_usd": 2500,
+          "type": "project"
+        }
+    ]
+}
 If nothing to save:
 "facts": {}
 
@@ -112,16 +130,16 @@ When the user asks for up-to-date info (e.g. “latest stock price of AAPL”, w
 	"name": "search",
 	"type": "text",
 	"args": {
-		query: Search query
-        region: us-en, uk-en, ru-ru, etc. Defaults to None.
-        safesearch: on, moderate, off. Defaults to "moderate".
-        timelimit: d, w, m, y. Defaults to None.
-        backend: auto, html, lite. Defaults to auto.
+		"query": Search query
+        "region": us-en, uk-en, ru-ru, etc. Defaults to None.
+        "safesearch": on, moderate, off. Defaults to "moderate".
+        "timelimit": d, w, m, y. Defaults to None.
+        "backend": auto, html, lite. Defaults to auto.
             auto - try all backends in random order,
             html - collect data from https://html.duckduckgo.com,
             lite - collect data from https://lite.duckduckgo.com,
             bing - collect data from https://www.bing.com.
-        max_results: max number of results. If None, returns results only from the first response. Defaults to None.
+        "max_results": max number of results. If None, returns results only from the first response. Defaults to None.
 
    } 
 }
@@ -130,21 +148,21 @@ or if search images:
 	"name": "search",
 	"type": "text",
 	"args": {
-		query: Search query
-        region: us-en, uk-en, ru-ru, etc. Defaults to "us-en".
-        safesearch: on, moderate, off. Defaults to "moderate".
-        timelimit: Day, Week, Month, Year. Defaults to None.
-        size: Small, Medium, Large, Wallpaper. Defaults to None.
-        color: color, Monochrome, Red, Orange, Yellow, Green, Blue,
+		"query": Search query
+        "region": us-en, uk-en, ru-ru, etc. Defaults to "us-en".
+        "safesearch": on, moderate, off. Defaults to "moderate".
+        "timelimit": Day, Week, Month, Year. Defaults to None.
+        "size": Small, Medium, Large, Wallpaper. Defaults to None.
+        "color": color, Monochrome, Red, Orange, Yellow, Green, Blue,
             Purple, Pink, Brown, Black, Gray, Teal, White. Defaults to None.
-        type_image: photo, clipart, gif, transparent, line.
+        "type_image": photo, clipart, gif, transparent, line.
             Defaults to None.
-        layout: Square, Tall, Wide. Defaults to None.
-        license_image: any (All Creative Commons), Public (PublicDomain),
+        "layout": Square, Tall, Wide. Defaults to None.
+        "license_image": any (All Creative Commons), Public (PublicDomain),
             Share (Free to Share and Use), ShareCommercially (Free to Share and Use Commercially),
             Modify (Free to Modify, Share, and Use), ModifyCommercially (Free to Modify, Share, and
             Use Commercially). Defaults to None.
-        max_results: max number of results. If None, returns results only from the first response. Defaults to None.
+        "max_results": max number of results. If None, returns results only from the first response. Defaults to None.
 	} 
 }
 ** Search query **

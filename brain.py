@@ -70,6 +70,7 @@ class KratixBrain:
         self.history = {}  # chat_id → [ messages ]
 
         self.fetcher = InternetFetcher(timeout=3.0, max_retries=2)
+        self.get_system_message(813664714, "Klamenzui")
 
     def start(self):
         """Start all background threads."""
@@ -84,7 +85,7 @@ class KratixBrain:
     def get_system_message(self, chat_id, user_id):
         # history = self.memory.get_fact_history(chat_id, user_id, "company_name")
         facts_dict = self.memory.get_latest_facts(chat_id, user_id)
-        facts = "\n".join(f"{k}: {v!r}" for k, v in facts_dict.items()) if facts_dict else ""
+        facts = "\n".join(json.dumps(v, indent=4) for k, v in facts_dict.items()) if facts_dict else ""
 
         settings_dict = self.memory.get_settings(user_id)
         settings = "\n".join(f"{k}: {v!r}" for k, v in settings_dict.items()) if settings_dict else ""
@@ -99,6 +100,8 @@ class KratixBrain:
         except FileNotFoundError:
             print("Warning: system_prompt.txt not found, using default")
             sys_prompt = "You are a helpful AI assistant."
+        with open(f"./prompts/current_system_prompt.txt", "w", encoding="utf-8") as f:
+            f.write(sys_prompt)
         return {"role": "system", "content": sys_prompt}
 
     def get_tpl_message(self, name, prompt_data):
