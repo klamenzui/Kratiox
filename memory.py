@@ -12,8 +12,8 @@ class MemoryDB:
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 
-    def resolve_group_id(self,chat_id , user_id, raw_gid: str) -> str:
-        g = self.get_group(chat_id , user_id, raw_gid.replace("?", ""))
+    def resolve_group_id(self, chat_id, user_id, raw_gid: str) -> str:
+        g = self.get_group(chat_id, user_id, raw_gid.replace("?", ""))
         # wenn neu, Raw beginnt mit '?'
         if not g:
             return uuid4().hex
@@ -115,8 +115,8 @@ class MemoryDB:
                 )
 
     def get_group(self, chat_id: str,
-                   user_id: str,
-                   group_id: str ):
+                  user_id: str,
+                  group_id: str):
         c = self.conn.cursor()
         c.execute("""
                         SELECT group_id, type, parent_id
@@ -126,9 +126,8 @@ class MemoryDB:
                     """, (chat_id, user_id, group_id))
         return c.fetchone()
 
-
-    def get_groups(self,chat_id: str,
-                     user_id: str):
+    def get_groups(self, chat_id: str,
+                   user_id: str):
         c = self.conn.cursor()
         c.execute("""
                         SELECT group_id, type, parent_id

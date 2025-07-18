@@ -150,60 +150,62 @@ class KratixBrain:
         except Exception as e:
             print(f"ERROR: Unexpected error calling LLM: {e}")
             return "Entschuldigung, es gab einen unerwarteten Fehler."
+        try:
+            sep: str = '###' if '###' in full else ''
+            print(sep)
+            sep = '<-->' if not sep and '<-->' in full else ''
+            print(sep)
+            sep = '```' if not sep and '```' in full else sep
+            print(sep, full)
+            if sep and sep in full:
+                answer, raw = full.split(sep, 1)
+                # strip everything outside the first {...}
+                start, end = raw.find("{"), raw.rfind("}")
+                if start != -1 and end != -1:
+                    js = raw[start:end + 1]
+                    try:
+                        obj = json.loads(js)
+                        print(f"Infos: {json.dumps(obj, indent=4)}")
+                        # store facts if any
+                        if obj.get("facts"):
+                            self.memory.store_facts(chat_id, user_id, obj["facts"])
+                        if obj.get("settings"):
+                            self.memory.store_settings(user_id, obj["settings"])
+                        if obj.get("action"):
+                            action = obj.get("action")
+                            if action.get("name") == "search" and not searched:
+                                if action.get("type") == "text":
+                                    results = self.fetcher.web_search(action.get("args"))
+                                    print("web search: ", action)
+                                    #messages = [
+                                    #    {"type": "text", "text": answer}] if answer else []
+                                    # messages.append({"type": "text","text": })
+                                    return self.call_chat(self.get_tpl_message("web_search", {
+                                                "query": action.get("args", {}).get('query'),
+                                                "results": results,
+                                            }), chat_id, user_id, True)
+                                if action.get("type") == "crypto_price":
+                                    results = self.fetcher.get_crypto_price(action.get("args"))
+                                    return self.call_chat(self.get_tpl_message("web_search", {
+                                        "query": action.get("args", {}).get('ids'),
+                                        "results": results,
+                                    }), chat_id, user_id, True)
 
-        sep: str = '###' if '###' in full else ''
-        print(sep)
-        sep = '<-->' if not sep and '<-->' in full else ''
-        print(sep)
-        sep = '```' if not sep and '```' in full else sep
-        print(sep, full)
-        if sep and sep in full:
-            answer, raw = full.split(sep, 1)
-            # strip everything outside the first {...}
-            start, end = raw.find("{"), raw.rfind("}")
-            if start != -1 and end != -1:
-                js = raw[start:end + 1]
-                try:
-                    obj = json.loads(js)
-                    print(f"Infos: {json.dumps(obj, indent=4)}")
-                    # store facts if any
-                    if obj.get("facts"):
-                        self.memory.store_facts(chat_id, user_id, obj["facts"])
-                    if obj.get("settings"):
-                        self.memory.store_settings(user_id, obj["settings"])
-                    if obj.get("action"):
-                        action = obj.get("action")
-                        if action.get("name") == "search" and not searched:
-                            if action.get("type") == "text":
-                                results = self.fetcher.web_search(action.get("args"))
-                                print("web search: ", action)
-                                #messages = [
-                                #    {"type": "text", "text": answer}] if answer else []
-                                # messages.append({"type": "text","text": })
-                                return self.call_chat(self.get_tpl_message("web_search", {
-                                            "query": action.get("args", {}).get('query'),
-                                            "results": results,
-                                        }), chat_id, user_id, True)
-                            if action.get("type") == "crypto_price":
-                                results = self.fetcher.get_crypto_price(action.get("args"))
-                                return self.call_chat(self.get_tpl_message("web_search", {
-                                    "query": action.get("args", {}).get('ids'),
-                                    "results": results,
-                                }), chat_id, user_id, True)
-
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Could not parse JSON: {e}")
-        else:
-            answer = full
-        answer = answer.replace(sep, "")
-        # 6) append assistant to history
-        self.history[chat_id].append({"role": "assistant", "content": answer.strip()})
-        # 7) prune old turns
-        max_turns = 8
-        turns = self.history[chat_id][1:]  # keep system prompt at 0
-        pruned = turns[-max_turns * 2:]
-        self.history[chat_id] = [self.history[chat_id][0]] + pruned
-
+                    except json.JSONDecodeError as e:
+                        print(f"Warning: Could not parse JSON: {e}")
+            else:
+                answer = full
+            answer = answer.replace(sep, "")
+            # 6) append assistant to history
+            self.history[chat_id].append({"role": "assistant", "content": answer.strip()})
+            # 7) prune old turns
+            max_turns = 8
+            turns = self.history[chat_id][1:]  # keep system prompt at 0
+            pruned = turns[-max_turns * 2:]
+            self.history[chat_id] = [self.history[chat_id][0]] + pruned
+        except Exception as e:
+            print(e)
+            answer = "an exception caused"
         return answer.strip()
 
     # ─── STT worker ──────────────────────────────────────────────────────────
