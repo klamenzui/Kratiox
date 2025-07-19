@@ -17,7 +17,8 @@ import numpy as np
 from Tools.scripts.objgraph import ignore
 from numba.np.numpy_support import is_array
 
-from memory import MemoryDB
+#from memory import MemoryDB
+from memory_raw import MemoryDB
 
 from fetcher import InternetFetcher
 
@@ -91,10 +92,10 @@ class KratixBrain:
         settings = "\n".join(f"{k}: {v!r}" for k, v in settings_dict.items()) if settings_dict else ""
         now = datetime.now(timezone.utc)
         try:
-            sys_prompt = self.get_tpl_message("system_prompt", {
+            sys_prompt = self.get_tpl_message("system_prompt_raw", {
                 "date": f"{now:%Y-%m-%d}",
                 "time": f"{now:%H:%M}Z",
-                "facts": facts,
+                "memory": facts,
                 "settings": settings
             })
         except FileNotFoundError:
@@ -167,8 +168,8 @@ class KratixBrain:
                         obj = json.loads(js)
                         print(f"Infos: {json.dumps(obj, indent=4)}")
                         # store facts if any
-                        if obj.get("facts"):
-                            self.memory.store_facts(chat_id, user_id, obj["facts"])
+                        if obj.get("memory"):
+                            self.memory.store_facts(chat_id, user_id, obj["memory"])
                         if obj.get("settings"):
                             self.memory.store_settings(user_id, obj["settings"])
                         if obj.get("action"):
