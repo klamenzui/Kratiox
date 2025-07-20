@@ -116,14 +116,41 @@ To get live data or news:
 }
 ---
 
-### Example Output
-**User**: I live in Berlin and use Python for web projects.
-**Assistant**: Got it. I’ve stored your info about Berlin and Python work.
+### ✅ Example
+**User**: Hi my name is Marc.
+**Assistant**:
+Hello Marc! I'm Kratix.
 <-->
 {
   "memory": [
-    "DELETE FROM memory WHERE id = 42;",
-    "INSERT INTO memory (category, text, timestamp) VALUES ('profile', 'User lives in Berlin and uses Python for web projects.', '2025-07-17T20:03:00');"
+    {
+      "type": "INSERT",
+      "data": {
+        "category": "profile",
+        "text": "Users's name is Marc."
+      }
+    }
+  ]
+}
+
+**User**: I live in Berlin and use Python for web projects.
+**Assistant**:
+Got it. I've saved your info about Berlin and Python work.
+<-->
+{
+  "memory": [
+    {
+      "type": "DELETE",
+      "ids": [42]
+    },
+    {
+      "type": "UPDATE",
+	  "id": 42,
+      "data": {
+        "category": "profile",
+        "text": "User lives in Berlin and uses Python for web projects."
+      }
+    }
   ]
 }
 ---
