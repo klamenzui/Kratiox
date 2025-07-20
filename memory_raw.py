@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 
-
 class MemoryDB:
     def __init__(self, db_path: str = "memory.db"):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -46,39 +45,39 @@ class MemoryDB:
         row = c.fetchone()
         return json.loads(row[0]) if row else {}
 
-    def store_facts(self, chat_id, user_id, obj):
-        type_ = obj.get("type")
-        params = obj.get("data", {})
-        params["chat_id"] = chat_id
-        params["user_id"] = user_id
-        params["timestamp"] = datetime.now(timezone.utc).isoformat() + "Z"
+    def store_facts(self, chat_id, user_id, cmd_list: list):
+        for obj in cmd_list:
+            type_ = obj.get("type")
+            params = obj.get("data", {})
+            params["chat_id"] = chat_id
+            params["user_id"] = user_id
+            params["timestamp"] = datetime.now(timezone.utc).isoformat() + "Z"
 
-        if type_ == "INSERT":
-            keys = list(params.keys())
-            values = list(params.values())
-            placeholders = ", ".join("?" for _ in keys)
-            self.conn.execute(
-                f"INSERT INTO summaries ({', '.join(keys)}) VALUES ({placeholders})",
-                values
-            )
-
-        elif type_ == "UPDATE":
-            self.conn.execute("""
-                UPDATE summaries
-                SET category = ?, text = ?, timestamp = ?
-                WHERE id = ?
-            """, (params["category"], params["text"], params["timestamp"], obj.get("id")))
-
-        elif type_ == "DELETE":
-            ids = obj.get("ids", [])
-            if ids:
-                placeholders = ", ".join("?" for _ in ids)
+            if type_ == "INSERT":
+                keys = list(params.keys())
+                values = list(params.values())
+                placeholders = ", ".join("?" for _ in keys)
                 self.conn.execute(
-                    f"DELETE FROM summaries WHERE id IN ({placeholders})", ids
+                    f"INSERT INTO summaries ({', '.join(keys)}) VALUES ({placeholders})",
+                    values
                 )
 
-        self.conn.commit()
+            elif type_ == "UPDATE":
+                self.conn.execute("""
+                    UPDATE summaries
+                    SET category = ?, text = ?, timestamp = ?
+                    WHERE id = ?
+                """, (params["category"], params["text"], params["timestamp"], obj.get("id")))
 
+            elif type_ == "DELETE":
+                ids = obj.get("ids", [])
+                if ids:
+                    placeholders = ", ".join("?" for _ in ids)
+                    self.conn.execute(
+                        f"DELETE FROM summaries WHERE id IN ({placeholders})", ids
+                    )
+
+            self.conn.commit()
 
     def get_latest_facts(self, chat_id: str, user_id: str) -> Dict[str, Dict[str, Any]]:
         c = self.conn.cursor()
