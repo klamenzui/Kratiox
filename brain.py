@@ -17,7 +17,7 @@ import numpy as np
 from Tools.scripts.objgraph import ignore
 from numba.np.numpy_support import is_array
 
-#from memory import MemoryDB
+# from memory import MemoryDB
 from memory_raw import MemoryDB
 
 from fetcher import InternetFetcher
@@ -59,6 +59,7 @@ class KratixBrain:
             "use_translate": False,
             "use_tts": False,
             "use_stt": False,
+            "use_model": "google/gemma-3-12b",  # "google/gemma-3-12b", "google/gemma-3-27b"
         }
 
         # prepare worker threads
@@ -113,7 +114,8 @@ class KratixBrain:
             message = message.replace(f'%{k}%', f'{v}')
         return message
 
-    def call_chat(self, text: any, chat_id: str, user_id: str, searched: bool = False) -> str:
+    def call_chat(self, content: any, chat_id: str, user_id: str, searched: bool = False) -> str:
+        settings = self.memory.get_settings(user_id)
         sys_message = self.get_system_message(chat_id, user_id)
         if chat_id not in self.history:
             self.history[chat_id] = [sys_message]
@@ -121,11 +123,11 @@ class KratixBrain:
             self.history[chat_id][0] = sys_message
 
         # 3) add the user message
-        self.history[chat_id].append({"role": "user", "content": text})
+        self.history[chat_id].append({"role": "user", "content": content})
 
         # 4) call your LLM endpoint
         payload = {
-            "model": "google/gemma-3-12b",
+            "model": settings.get("use_model", self.settings.get("use_model")),
             "stream": False,
             "messages": self.history[chat_id]
         }
@@ -134,7 +136,7 @@ class KratixBrain:
 
         try:
             # Check if LLM server is running
-            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=180)
+            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=240)
             print(f"DEBUG: LLM response status: {r.status_code}")
             if r.status_code != 200:
                 print(f"DEBUG: LLM response text: {r.text}")
@@ -152,7 +154,8 @@ class KratixBrain:
             print(f"ERROR: Unexpected error calling LLM: {e}")
             return "Entschuldigung, es gab einen unerwarteten Fehler."
         try:
-            sep: str = '###' if '###' in full else ''
+            sep: str = '[TOOL_CALLS]' if '[TOOL_CALLS]' in full else ''
+            sep = '###' if not sep and '###' in full else ''
             print(sep)
             sep = '<-->' if not sep and '<-->' in full else ''
             print(sep)
@@ -172,19 +175,21 @@ class KratixBrain:
                             self.memory.store_facts(chat_id, user_id, obj["memory"])
                         if obj.get("settings"):
                             self.memory.store_settings(user_id, obj["settings"])
+                        if obj.get("task"):
+                            print(user_id, obj["task"])
                         if obj.get("action"):
                             action = obj.get("action")
                             if action.get("name") == "search" and not searched:
                                 if action.get("type") == "text":
                                     results = self.fetcher.web_search(action.get("args"))
                                     print("web search: ", action)
-                                    #messages = [
+                                    # messages = [
                                     #    {"type": "text", "text": answer}] if answer else []
                                     # messages.append({"type": "text","text": })
                                     return self.call_chat(self.get_tpl_message("web_search", {
-                                                "query": action.get("args", {}).get('query'),
-                                                "results": results,
-                                            }), chat_id, user_id, True)
+                                        "query": action.get("args", {}).get('query'),
+                                        "results": results,
+                                    }), chat_id, user_id, True)
                                 if action.get("type") == "crypto_price":
                                     results = self.fetcher.get_crypto_price(action.get("args"))
                                     return self.call_chat(self.get_tpl_message("web_search", {
