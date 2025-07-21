@@ -41,8 +41,8 @@ class TelegramBot:
         chat_id = update.effective_chat.id
         text = update.message.text
         try:
-            reply = self.brain.call_chat(text, chat_id=str(chat_id), user_id=name)
-            await update.message.reply_text(reply)
+            reply = await self.brain.call_chat(text, chat_id=str(chat_id), user_id=name, callback=update.message.reply_text)
+            #await update.message.reply_text(reply)
         except Exception as e:
             print(e)
 
@@ -62,7 +62,7 @@ class TelegramBot:
         # STT
         lang, text = self.brain.call_service("stt", data=wav_bytes)
         # Chat
-        reply = self.brain.call_chat(text, chat_id=str(chat_id), user_id=name)
+        reply = await self.brain.call_chat(text, chat_id=str(chat_id), user_id=name)
 
         # TTS back to user
         pcm = self.brain.call_service("tts",
@@ -94,8 +94,8 @@ class TelegramBot:
         messages = [{"type": "text", "text": update.message.caption}] if update.message.caption else []
         messages.append({"type": "image_url", "image_url": {"url": data_uri}})
         try:
-            reply = self.brain.call_chat(messages, chat_id=str(chat_id), user_id=name)
-            await update.message.reply_text(reply)
+            reply = await self.brain.call_chat(messages, chat_id=str(chat_id), user_id=name, callback=update.message.reply_text)
+            #await update.message.reply_text(reply)
         except Exception as e:
             print(e)
 

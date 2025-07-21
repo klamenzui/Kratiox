@@ -1,13 +1,18 @@
 # tool_handler.py
 import json
 
+
+def get_sep(raw):
+    return next((s for s in ['[TOOL_CALLS]', '###', '<-->', '```'] if s in raw), '')
+
+
 class ToolHandler:
     def __init__(self, memory, fetcher):
         self.memory = memory
         self.fetcher = fetcher
 
     def process_llm_response(self, raw: str, chat_id: str, user_id: str, searched: bool = False):
-        sep = next((s for s in ['[TOOL_CALLS]', '###', '<-->', '```'] if s in raw), '')
+        sep = get_sep(raw)
         answer = raw
         next_prompt = None
 
