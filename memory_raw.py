@@ -57,7 +57,7 @@ class MemoryDB:
 
         # 3) add the user message
         self.history[self.chat_id].append({"role": "user", "content": content})
-        return self.history
+        return self.history[self.chat_id]
 
 
     def append_history(self, answer):
@@ -148,9 +148,10 @@ class MemoryDB:
             WHERE chat_id=? and user_id=?
             ORDER BY timestamp
         """, (chat_id, user_id))
-        groups = {user_id: {}}
+        group_id = f"{chat_id}_{user_id}"
+        groups = {group_id: {}}
         for row in c.fetchall():
-            groups[chat_id + "_" + user_id][row["id"]] = {
+            groups[group_id][row["id"]] = {
                 "id": row["id"],
                 "category": row["category"],
                 "text": row["text"],
