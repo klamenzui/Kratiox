@@ -118,9 +118,9 @@ To get live data or news:
 ---
 
 ### ✅ Example
-**User**: Hi my name is Marc.
+**User**: Hi my name is <some name>.
 **Assistant**:
-Hello Marc! I'm Kratix.
+Hello <some name>! I'm Kratix.
 <-->
 {
   "memory": [
@@ -128,15 +128,15 @@ Hello Marc! I'm Kratix.
       "type": "INSERT",
       "data": {
         "category": "profile",
-        "text": "Users's name is Marc."
+        "text": "Users's name is <some name>."
       }
     }
   ]
 }
 
-**User**: I live in Berlin and use Python for web projects. I have apartment at Wittel Street 22, Hamburg.
+**User**: I live in <some city> and use <some language> for <some project>. I have apartment at <some address>.
 **Assistant**:
-Got it. I've saved your info about Berlin, your another apartment and Python work.
+Got it. I've saved your info about <some city>, your another apartment and <some project> work.
 <-->
 {
   "memory": [
@@ -145,14 +145,14 @@ Got it. I've saved your info about Berlin, your another apartment and Python wor
 	  "id": 42,
       "data": {
         "category": "profile",
-        "text": "Users's name is Marc. User lives in Berlin. He has also apartment at Wittel Street 22, Hamburg. He uses Python for web projects."
+        "text": "Users's name is <some name>. User lives in <some city>. He has also apartment at <some address>. He uses <some language> for <some project>."
       }
     },
     {
       "type": "INSERT",
       "data": {
         "category": "apartment",
-        "text": "The apartment at 22 Wittel Street belongs to Mark."
+        "text": "The apartment at <some address> belongs to <some name>."
       }
     }
   ]

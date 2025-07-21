@@ -69,10 +69,10 @@ class KratixBrain:
             threading.Thread(target=self._trans_loop, daemon=True),
             threading.Thread(target=self._tts_loop, daemon=True),
         ]
-        self.history = {}  # chat_id → [ messages ]
 
         self.fetcher = InternetFetcher(timeout=3.0, max_retries=2)
-        self.get_system_message(813664714, "Klamenzui")
+        self.memory.set_context(813664714, "Klamenzui") # self.settings.get('curr_lang', 'en')
+        self.memory.get_system_message()
 
     def start(self):
         """Start all background threads."""
@@ -84,58 +84,21 @@ class KratixBrain:
         for name in list(self.services):
             self._stop_service(name)
 
-    def get_system_message(self, chat_id, user_id):
-        # history = self.memory.get_fact_history(chat_id, user_id, "company_name")
-        facts_dict = self.memory.get_latest_facts(chat_id, user_id)
-        facts = "\n".join(json.dumps(v, indent=4) for k, v in facts_dict.items()) if facts_dict else ""
-
-        settings_dict = self.memory.get_settings(user_id)
-        settings = "\n".join(f"{k}: {v!r}" for k, v in settings_dict.items()) if settings_dict else ""
-        now = datetime.now(timezone.utc)
-        try:
-            sys_prompt = self.get_tpl_message("system_prompt_raw", {
-                "date": f"{now:%Y-%m-%d}",
-                "time": f"{now:%H:%M}Z",
-                "memory": facts,
-                "settings": settings
-            })
-        except FileNotFoundError:
-            print("Warning: system_prompt.txt not found, using default")
-            sys_prompt = "You are a helpful AI assistant."
-        with open(f"./prompts/current_system_prompt.txt", "w", encoding="utf-8") as f:
-            f.write(sys_prompt)
-        return {"role": "system", "content": sys_prompt}
-
-    def get_tpl_message(self, name, prompt_data):
-        message = ""
-        with open(f"./prompts/{self.settings.get('curr_lang', 'en')}/{name}.txt", "r", encoding="utf-8") as f:
-            message = f.read().strip()
-        for k, v in prompt_data.items():
-            message = message.replace(f'%{k}%', f'{v}')
-        return message
-
     def call_chat(self, content: any, chat_id: str, user_id: str, searched: bool = False) -> str:
-        settings = self.memory.get_settings(user_id)
-        sys_message = self.get_system_message(chat_id, user_id)
-        if chat_id not in self.history:
-            self.history[chat_id] = [sys_message]
-        else:
-            self.history[chat_id][0] = sys_message
-
-        # 3) add the user message
-        self.history[chat_id].append({"role": "user", "content": content})
+        self.memory.set_context(chat_id, user_id)
+        settings = self.memory.get_settings()
+        history = self.memory.get_history(content)
 
         # 4) call your LLM endpoint
         payload = {
             "model": settings.get("use_model", self.settings.get("use_model")),
             "stream": False,
-            "messages": self.history[chat_id]
+            "messages": history
         }
 
         print(f"DEBUG: Calling LLM with payload: {json.dumps(payload, indent=2)}")
 
         try:
-            # Check if LLM server is running
             r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=240)
             print(f"DEBUG: LLM response status: {r.status_code}")
             if r.status_code != 200:
@@ -172,9 +135,9 @@ class KratixBrain:
                         print(f"Infos: {json.dumps(obj, indent=4)}")
                         # store facts if any
                         if obj.get("memory"):
-                            self.memory.store_facts(chat_id, user_id, obj["memory"])
+                            self.memory.store_facts(obj["memory"])
                         if obj.get("settings"):
-                            self.memory.store_settings(user_id, obj["settings"])
+                            self.memory.store_settings(obj["settings"])
                         if obj.get("task"):
                             print(user_id, obj["task"])
                         if obj.get("action"):
@@ -186,13 +149,13 @@ class KratixBrain:
                                     # messages = [
                                     #    {"type": "text", "text": answer}] if answer else []
                                     # messages.append({"type": "text","text": })
-                                    return self.call_chat(self.get_tpl_message("web_search", {
+                                    return self.call_chat(self.memory.get_tpl_message("web_search", {
                                         "query": action.get("args", {}).get('query'),
                                         "results": results,
                                     }), chat_id, user_id, True)
                                 if action.get("type") == "crypto_price":
                                     results = self.fetcher.get_crypto_price(action.get("args"))
-                                    return self.call_chat(self.get_tpl_message("web_search", {
+                                    return self.call_chat(self.memory.get_tpl_message("web_search", {
                                         "query": action.get("args", {}).get('ids'),
                                         "results": results,
                                     }), chat_id, user_id, True)
@@ -202,13 +165,7 @@ class KratixBrain:
             else:
                 answer = full
             answer = answer.replace(sep, "")
-            # 6) append assistant to history
-            self.history[chat_id].append({"role": "assistant", "content": answer.strip()})
-            # 7) prune old turns
-            max_turns = 8
-            turns = self.history[chat_id][1:]  # keep system prompt at 0
-            pruned = turns[-max_turns * 2:]
-            self.history[chat_id] = [self.history[chat_id][0]] + pruned
+            self.memory.append_history(answer)
         except Exception as e:
             print(e)
             answer = "an exception caused"
