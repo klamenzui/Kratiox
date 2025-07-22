@@ -1,3 +1,4 @@
+import logging
 from queue import Queue
 import threading
 import sounddevice as sd
@@ -9,6 +10,15 @@ from service_manager import ServiceManager
 from tool_handler import ToolHandler, get_sep
 import json
 import requests
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("kratix.log"),
+        logging.StreamHandler()
+    ]
+)
 
 
 class KratixBrain:
@@ -78,7 +88,7 @@ class KratixBrain:
             data = r.json()
             full = data["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            print(f"Chat error: {e}")
+            logging.error("Chat error: %s", e)
             return "Entschuldigung, der Chat-Service ist nicht verfügbar."
 
         try:
@@ -89,7 +99,7 @@ class KratixBrain:
             if next_prompt:
                 return await self.call_chat(next_prompt, chat_id, user_id, searched=True)
         except Exception as e:
-            print(e)
+            logging.exception("ToolHandler error")
             answer = "Ein Fehler ist aufgetreten."
         answer = answer.strip()
         if callback:
@@ -103,7 +113,12 @@ class KratixBrain:
             buffer = ""
             msg = ""
             is_end = False
-            for line in r.iter_lines(decode_unicode=True):
+            for raw_line in r.iter_lines():
+                try:
+                    line = raw_line.decode("utf-8")
+                except UnicodeDecodeError:
+                    logging.warning("Unicode decode error in stream line")
+                    line = raw_line.decode("utf-8", errors="replace")
                 if line and line.startswith("data:"):
                     chunk = line[5:].strip()
                     if chunk == "[DONE]":
@@ -114,17 +129,15 @@ class KratixBrain:
                         buffer += delta
                         msg += delta
                         if any(buffer.endswith(p) for p in [". ", ".", "! ", "? ", "\n"]):
-                            print("[stream]", buffer.strip())
-                            # Optional: Queue für TTS
-                            # self.queues["tts"].put((buffer.strip(), self.settings["curr_lang"]))
+                            logging.debug("[stream] %s", buffer.strip())
                             if not is_end:
                                 is_end = get_sep(msg) != ""
                             if callback and not is_end:
                                 await callback(msg)
-                                msg = ""
+                                #msg = ""
                     except Exception as e:
-                        print(f"Stream parse error: {e}")
-            print("[complete]", buffer.strip())
+                        logging.warning("Stream parse error: %s", e)
+            logging.debug("[complete] %s", buffer.strip())
             answer, next_prompt = self.tool_handler.process_llm_response(
                 buffer.strip(), chat_id=chat_id, user_id=user_id, searched=searched
             )
@@ -134,7 +147,7 @@ class KratixBrain:
                 return await self.call_chat(next_prompt, chat_id, user_id, searched=True)
             return answer
         except Exception as e:
-            print(f"Streaming chat error: {e}")
+            logging.error("Streaming chat error: %s", e)
             return "Streaming fehlgeschlagen."
 
     def _stt_loop(self):
@@ -150,7 +163,7 @@ class KratixBrain:
                         reply = self.call_chat(text, chat_id="audio", user_id=self.user_id)
                         self.queues["tts"].put((reply, lang))
             except Exception as e:
-                print(f"STT loop error: {e}")
+                logging.error("STT loop error: %s", e)
 
     def _trans_loop(self):
         while True:
@@ -160,7 +173,7 @@ class KratixBrain:
                 if tr:
                     self.queues["tts"].put((tr, self.settings["dest_lang"]))
             except Exception as e:
-                print(f"Translation loop error: {e}")
+                logging.error("Translation loop error: %s", e)
 
     def _tts_loop(self):
         while True:
@@ -170,7 +183,7 @@ class KratixBrain:
                 sd.play(audio, samplerate=22050)
                 sd.wait()
             except Exception as e:
-                print(f"TTS error: {e}")
+                logging.error("TTS error: %s", e)
 
     def _record_loop(self):
         try:
@@ -205,7 +218,7 @@ class KratixBrain:
                                 buffer = []
                                 silence_ct = 0
                     except Exception as e:
-                        print(f"Recording loop error: {e}")
+                        logging.warning("Recording loop error: %s", e)
         except Exception as e:
-            print(f"Fatal recording error: {e}")
+            logging.critical("Fatal recording error: %s", e)
             raise

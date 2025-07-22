@@ -91,7 +91,10 @@ To apply user preferences (e.g. language or reply format), use:
 ---
 
 ### Task Scheduler
-For reminders or recurring tasks, use:
+Use `"type": "reminder"` for one-time appointments and `"periodic"` for recurring tasks.
+Enter `title`, `details` and depending on the type:
+- `"time"` (ISO 8601) for reminders
+- `"freq"` + `"hour"` (+ optional `"minute"`) for periodic:
 {
   "task": {
     "title": "Check email",
@@ -100,6 +103,18 @@ For reminders or recurring tasks, use:
     "details": "Remind user to check email"
   }
 }
+or periodic:
+{
+  "task": {
+    "title": "Breakfast reminder",
+    "type": "periodic",
+    "freq": "DAILY",
+    "hour": 8,
+    "minute": 0,
+    "details": "Daily breakfast reminder"
+  }
+}
+
 ---
 
 ### Web Search
