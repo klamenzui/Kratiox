@@ -1,4 +1,5 @@
 # fetcher.py
+import re
 import time
 import requests
 from functools import lru_cache
@@ -102,6 +103,15 @@ class InternetFetcher:
             title = r.get("title", "").strip()
             body = r.get("body", "").strip()  # kurzer Auszug
             url = r.get("href", "").strip()
+            try:
+                html = requests.get(url, timeout=5).text
+                soup = BeautifulSoup(html, "html.parser")
+                content = soup.get_text(separator="\n")
+                content = content.replace("\n\n", "\n")
+                text_cleaned = re.sub(r"\n\s*\n+", "\n", content)
+                body = text_cleaned[:10000]  # Vorschau
+            except Exception as e:
+                pass
             lines.append(f"{title}\n{body}\n{url}\n")
             with open(f"{i}.dd.html", "w", encoding="utf-8") as f:
                 f.write(f"{title}\n{body}\n{url}\n")

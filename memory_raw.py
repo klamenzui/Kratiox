@@ -7,6 +7,7 @@ from uuid import uuid4
 import threading
 import logging
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -88,6 +89,13 @@ class MemoryDB:
             turns = self.history[self.chat_id][1:]
             pruned = turns[-max_turns * 2:]
             self.history[self.chat_id] = [self.history[self.chat_id][0]] + pruned
+            try:
+                with open(f"./prompts/current_system_prompt.txt", "w", encoding="utf-8") as f:
+                    f.write(self.history[self.chat_id][0]["content"])
+                with open(f"./prompts/current_history.json", "w", encoding="utf-8") as f:
+                    f.write(json.dumps(self.history, indent=4))
+            except Exception as e:
+                logging.warning("Unable to write current_system_prompt.txt: %s", e)
 
     def get_system_message(self):
         facts_dict = self.get_latest_facts()
@@ -105,11 +113,6 @@ class MemoryDB:
         except Exception as e:
             logging.error("System prompt error: %s", e)
             sys_prompt = "You are a helpful AI assistant."
-        try:
-            with open(f"./prompts/current_system_prompt.txt", "w", encoding="utf-8") as f:
-                f.write(sys_prompt)
-        except Exception as e:
-            logging.warning("Unable to write current_system_prompt.txt: %s", e)
         return {"role": "system", "content": sys_prompt}
 
     def store_settings(self, settings: Dict[str, Any]):

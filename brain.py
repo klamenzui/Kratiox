@@ -52,9 +52,6 @@ class KratixBrain:
             threading.Thread(target=self._tts_loop, daemon=True),
         ]
 
-        self.memory.set_context(813664714, "Klamenzui")
-        self.memory.get_system_message()
-
     def start(self):
         for t in self._threads:
             t.start()
