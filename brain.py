@@ -42,7 +42,7 @@ class KratixBrain:
             "use_tts": False,
             "use_stt": False,
             "use_streaming": True,
-            "use_model": "google/gemma-3-12b",
+            "use_model": "gemma3:27b",
         }
 
         self._threads = [
@@ -80,10 +80,10 @@ class KratixBrain:
 
     async def _sync_chat(self, payload, chat_id, user_id, searched, callback):
         try:
-            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, timeout=240)
+            r = requests.post("http://localhost:11434/api/chat", json=payload, timeout=240)
             r.raise_for_status()
             data = r.json()
-            full = data["choices"][0]["message"]["content"].strip()
+            full = data["message"]["content"].strip()
         except Exception as e:
             logging.error("Chat error: %s", e)
             return "Entschuldigung, der Chat-Service ist nicht verfügbar."
@@ -105,7 +105,7 @@ class KratixBrain:
 
     async def _stream_chat(self, payload, chat_id, user_id, searched, callback):
         try:
-            r = requests.post("http://localhost:1234/v1/chat/completions", json=payload, stream=True, timeout=300)
+            r = requests.post("http://localhost:11434/api/chat", json=payload, stream=True, timeout=300)
             r.raise_for_status()
             buffer = ""
             msg = ""
@@ -122,7 +122,7 @@ class KratixBrain:
                         break
                     try:
                         data = json.loads(chunk)
-                        delta = data["choices"][0]["delta"].get("content", "")
+                        delta = data.get("message").get("content", "")
                         buffer += delta
                         msg += delta
                         if any(buffer.endswith(p) for p in [". ", ".", "! ", "? ", "\n"]):
