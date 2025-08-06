@@ -101,15 +101,18 @@ class InternetFetcher:
         i = 0
         for r in results:
             title = r.get("title", "").strip()
-            body = r.get("body", "").strip()  # kurzer Auszug
             url = r.get("href", "").strip()
+            body = r.get("body", "").strip()  # kurzer Auszug
             try:
                 html = requests.get(url, timeout=5).text
                 soup = BeautifulSoup(html, "html.parser")
-                content = soup.get_text(separator="\n")
+                if "wikipedia" in url:
+                    content = soup.select_one("#mw-content-text").get_text(separator="\n")
+                else:
+                    content = soup.get_text(separator="\n")
                 content = content.replace("\n\n", "\n")
                 text_cleaned = re.sub(r"\n\s*\n+", "\n", content)
-                body = text_cleaned[:10000]  # Vorschau
+                body = text_cleaned[:50000] + "..." # Vorschau
             except Exception as e:
                 pass
             lines.append(f"{title}\n{body}\n{url}\n")

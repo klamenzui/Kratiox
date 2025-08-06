@@ -21,6 +21,7 @@ logging.basicConfig(
 )
 
 
+
 class KratixBrain:
     def __init__(self):
         self.queues = {

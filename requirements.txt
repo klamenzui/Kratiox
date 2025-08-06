@@ -19,3 +19,5 @@ beautifulsoup4~=4.13.4
 #openai-whisper~=
 python-telegram-bot~=22.1
 faster-whisper==1.1.1
+ollama
+spacy

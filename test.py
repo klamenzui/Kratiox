@@ -1,5 +1,6 @@
 import requests
 
+
 """
 
 
@@ -67,7 +68,7 @@ class Test:
         for k, v in result.items():
             with open(f"{i}.html", "w", encoding="utf-8") as f:
                 f.write(v)
-            i+=1
+            i += 1
         return result
 
 
@@ -75,9 +76,55 @@ class Test:
 #print(Test().google_search("weather in Hemau Germany today"))
 
 
-
 #web_search("weather in Hemau Germany", "de-DE")
 #web_search("sol price")
 #web_search("what is python")
 fetcher = InternetFetcher()
-fetcher.web_search({'query': 'current president of USA', 'region': 'us-en', 'timelimit': 'd', 'max_results': 3})
+
+#fetcher.web_search({'query': 'current president of USA', 'region': 'us-en', 'timelimit': 'd', 'max_results': 3})
+import json
+import requests
+OLLAMA_URL = "http://localhost:11434"
+MODEL_NAME = "deepseek-r1:1.5b"
+def download_model(model_name: str):
+    print(f"🔄 Lade Modell '{model_name}' herunter...")
+    resp = requests.post(
+        f"{OLLAMA_URL}/api/pull",
+        json={"name": model_name},
+        stream=True,
+    )
+
+    if resp.status_code != 200:
+        print(f"❌ Fehler beim Herunterladen: {resp.status_code} - {resp.text}")
+        return
+
+    for line in resp.iter_lines():
+        if line:
+            try:
+                data = json.loads(line.decode("utf-8"))
+                if "status" in data:
+                    print(f"[{data['status']}]")
+                elif "completed" in data and "total" in data:
+                    done = data["completed"]
+                    total = data["total"]
+                    percent = int(done / total * 100)
+                    print(f"📥 {done}/{total} Bytes ({percent}%)")
+            except Exception as e:
+                print(f"⚠️ Fehler beim Parsen: {e}")
+
+    print("✅ Modell wurde vollständig heruntergeladen.")
+
+def generate():
+    resp = requests.post(f"{OLLAMA_URL}/api/generate", json={
+        "model": MODEL_NAME,  # oder dein Modellname
+        "prompt": "Was ist der Sinn des Lebens?"
+    })
+    print(resp.text)
+    return resp.json()
+def models_list():
+    resp = requests.get(f"{OLLAMA_URL}/api/tags")
+    return resp.json()
+#export OLLAMA_MODELS=/media/klamenzui/OS/dev/projects/python/Kratiox/ollama
+#download_model(MODEL_NAME)
+#models_list()
+print(generate())
